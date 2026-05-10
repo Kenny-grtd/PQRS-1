@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 import bcrypt
 import base64
+import json
 import uuid
 import os
 from pathlib import Path
@@ -25,7 +26,9 @@ from typing import Any
 
 # Cargar variables de entorno
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///reflex.db")
+DEFAULT_DATABASE_PATH = BASE_DIR / "reflex.db"
+DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
+DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 engine = create_engine(DATABASE_URL, echo=False)
 SQLModel.metadata.create_all(engine)
 
@@ -167,6 +170,7 @@ def enviar_correo_notificacion(email_destinatario: str, asunto: str, cuerpo: str
 
 class State(rx.State):
     "En esta clase se define el estado de la aplicación, es decir, las variables que se van a usar en la aplicación y sus valores iniciales."
+    state_auto_setters = False
     contraseña: str = ""
     confirmar_contraseña: str = ""
     correo: str = ""
@@ -200,6 +204,8 @@ class State(rx.State):
     descripcion: str = ""
     ubicacion: str = ""
     documento: str = ""
+    documentos: list[dict] = []
+    documento_nombres: list[str] = []
     documento_nombre: str = ""
     descripcion_len: int = 0
     query_solicitud: str = ""
@@ -242,9 +248,9 @@ class State(rx.State):
     
     # Campos para consultar estado de solicitud
     consulta_radicado: str = ""
-    solicitud_consultada: dict = {}
+    solicitud_consultada: dict[str, Any] = {}
     consulta_mensaje: str = ""
-    
+     
     @rx.var
     def numero_solicitudes(self) -> str:
         return str(len(self.solicitudes or []))
@@ -294,6 +300,15 @@ class State(rx.State):
                 continue
             resultados.append(solicitud)
         return resultados
+
+    @rx.var
+    def documento_nombres_joined(self) -> str:
+        return ", ".join(self.documento_nombres or [])
+    
+    @rx.var
+    def documento_nombres_count(self) -> str:
+        return str(len(self.documento_nombres or []))
+    
     
     def set_query_solicitud(self, value: str):
         self.query_solicitud = value or ""
@@ -419,17 +434,31 @@ class State(rx.State):
         self.acepta_notificaciones = bool(checked)
 
     def set_documento(self, documento: Any):
-        """Actualiza el adjunto cuando el ciudadano selecciona un archivo."""
-        if isinstance(documento, dict):
-            name = documento.get("name") or documento.get("filename") or "adjunto"
-            self.documento_nombre = name
-            self.documento = documento
-        elif isinstance(documento, str):
-            self.documento_nombre = os.path.basename(documento)
-            self.documento = documento
+        """Actualiza los adjuntos cuando el ciudadano selecciona uno o varios archivos."""
+        self.documentos = []
+        self.documento_nombres = []
+        self.documento = ""
+        self.documento_nombre = ""
+
+        def add_document(item: Any):
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("filename") or "adjunto"
+                self.documento_nombres.append(name)
+                self.documentos.append(item)
+            elif isinstance(item, str):
+                self.documento_nombres.append(os.path.basename(item))
+                self.documentos.append(item)
+            else:
+                self.documentos.append(item)
+
+        if isinstance(documento, list):
+            for item in documento:
+                add_document(item)
         else:
-            self.documento_nombre = ""
-            self.documento = documento
+            add_document(documento)
+
+        if self.documento_nombres:
+            self.documento_nombre = ", ".join(self.documento_nombres)
 
     def set_editar_solicitud_id(self, id: int):
         self.editar_solicitud_id = id
@@ -701,6 +730,7 @@ Atentamente,
 Equipo de Atención al Ciudadano
 Sistema PQRS
 """
+
                 # Enviar correo al ciudadano
                 enviar_correo_notificacion(solicitud_info['creado_por'], asunto_email, cuerpo_email)
             
@@ -718,7 +748,42 @@ Sistema PQRS
             if match:
                 respuesta_documento_basename = match.group(1).strip()
                 respuesta_text = re.sub(r"\s*\[DOCUMENTO ADJUNTO:[^\]]+\]", "", respuesta_text).strip()
-        documento_basename = solicitud.documento_basename
+
+        documento_basenames = []
+        if solicitud.documento_basename:
+            try:
+                parsed_names = json.loads(solicitud.documento_basename)
+                if isinstance(parsed_names, list):
+                    documento_basenames = parsed_names
+                else:
+                    documento_basenames = [parsed_names]
+            except Exception:
+                documento_basenames = [solicitud.documento_basename]
+
+        documento_paths = []
+        if solicitud.documento:
+            try:
+                parsed_paths = json.loads(solicitud.documento)
+                if isinstance(parsed_paths, list):
+                    documento_paths = parsed_paths
+                else:
+                    documento_paths = [parsed_paths]
+            except Exception:
+                documento_paths = [solicitud.documento]
+
+        documento_adjuntos = []
+        for idx, path in enumerate(documento_paths):
+            basename = documento_basenames[idx] if idx < len(documento_basenames) else os.path.basename(str(path))
+            documento_adjuntos.append(
+                {
+                    "basename": basename,
+                    "href": f"/assets/uploads/{quote(basename)}" if basename else "",
+                }
+            )
+
+        documento_basename = documento_adjuntos[0]["basename"] if documento_adjuntos else ""
+        documento_href = documento_adjuntos[0]["href"] if documento_adjuntos else ""
+
         return {
             "id": solicitud.id,
             "radicado": solicitud.radicado,
@@ -729,15 +794,32 @@ Sistema PQRS
             "area_responsable": solicitud.area_responsable,
             "documento": solicitud.documento,
             "documento_basename": documento_basename,
-            "documento_href": f"/assets/uploads/{quote(documento_basename)}" if documento_basename else None,
+            "documento_href": documento_href,
+            "documento_adjuntos": documento_adjuntos,
+            "documento_adjuntos_json": json.dumps(documento_adjuntos),
             "estado": solicitud.estado,
             "respuesta": respuesta_text,
             "respuesta_documento_basename": respuesta_documento_basename,
-            "respuesta_documento_href": f"/assets/uploads/{quote(respuesta_documento_basename)}" if respuesta_documento_basename else None,
+            "respuesta_documento_href": f"/assets/uploads/{quote(respuesta_documento_basename)}" if respuesta_documento_basename else "",
             "fecha": solicitud.fecha.strftime("%Y-%m-%d %H:%M") if isinstance(solicitud.fecha, datetime) else str(solicitud.fecha),
             "creado_por": solicitud.creado_por,
             "usuario_id": solicitud.usuario_id,
         }
+
+    @rx.var
+    def solicitud_consultada_adjuntos(self) -> list[dict[str, str]]:
+        docs = self.solicitud_consultada.get("documento_adjuntos", [])
+        if not isinstance(docs, list):
+            return []
+
+        resultado = []
+        for doc in docs:
+            if isinstance(doc, dict):
+                resultado.append({
+                    "basename": str(doc.get("basename", "")),
+                    "href": str(doc.get("href", "")),
+                })
+        return resultado
 
     def cargar_solicitudes(self):
         try:
@@ -826,6 +908,9 @@ Sistema PQRS
             return
         with rx.session() as session:
             user = session.exec(select(Usuario).where(Usuario.email == self.correo)).first()
+            print(f"Login lookup for: {self.correo} -> {'FOUND' if user else 'NOT FOUND'}")
+            if user:
+                print(f"  stored hash present: {bool(user.Contraseña)}")
             pw_ok = False
             try:
                 pw_ok = confirmar_contraseña(self.contraseña, user.Contraseña) if user else False
@@ -914,6 +999,8 @@ Sistema PQRS
         self.descripcion = ""
         self.ubicacion = ""
         self.documento = ""
+        self.documentos = []
+        self.documento_nombres = []
         self.documento_nombre = ""
         self.area_responsable = ""
         self.area_otro = ""
@@ -939,38 +1026,65 @@ Sistema PQRS
             self.solicitud_mensaje = "Debes aceptar la Política de Tratamiento de Datos Personales antes de enviar."
             return
 
-        documento_guardado = ""
-        if self.documento:
+        documentos_guardados: list[str] = []
+        documento_basenames_guardados: list[str] = []
+
+        def guardar_archivo(item: Any) -> None:
+            if isinstance(item, str) and not item.startswith("data:"):
+                documentos_guardados.append(item)
+                documento_basenames_guardados.append(os.path.basename(item))
+                return
+
+            if isinstance(item, str) and item.startswith("data:"):
+                header, b64 = item.split(",", 1)
+                mime = header.split(";")[0].split(":")[1] if ":" in header else ""
+                ext = mime.split("/")[-1] if "/" in mime else "bin"
+                saved_name = f"solicitud_{uuid.uuid4().hex}.{ext}"
+                path = os.path.join(UPLOAD_DIR, saved_name)
+                with open(path, "wb") as f:
+                    f.write(base64.b64decode(b64))
+                documentos_guardados.append(path)
+                documento_basenames_guardados.append(saved_name)
+                return
+
+            if isinstance(item, dict) and "content" in item:
+                content = item.get("content")
+                name = item.get("name", f"solicitud_{uuid.uuid4().hex}")
+                name = sanitizar_nombre_archivo(name)
+                if isinstance(content, str) and content.startswith("data:"):
+                    _, b64 = content.split(",", 1)
+                    data = base64.b64decode(b64)
+                else:
+                    data = base64.b64decode(content)
+                path = os.path.join(UPLOAD_DIR, name)
+                with open(path, "wb") as f:
+                    f.write(data)
+                documentos_guardados.append(path)
+                documento_basenames_guardados.append(name)
+                return
+
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("filename") or f"solicitud_{uuid.uuid4().hex}"
+                name = sanitizar_nombre_archivo(name)
+                documento_basenames_guardados.append(name)
+                documentos_guardados.append(name)
+                return
+
+            documento_basenames_guardados.append(str(item))
+            documentos_guardados.append(str(item))
+
+        if self.documentos:
             try:
                 os.makedirs(UPLOAD_DIR, exist_ok=True)
-                # Caso: data URL (base64)
-                if isinstance(self.documento, str) and self.documento.startswith("data:"):
-                    header, b64 = self.documento.split(",", 1)
-                    mime = header.split(";")[0].split(":")[1] if ":" in header else ""
-                    ext = mime.split("/")[-1] if "/" in mime else "bin"
-                    saved_name = f"solicitud_{uuid.uuid4().hex}.{ext}"
-                    path = os.path.join(UPLOAD_DIR, saved_name)
-                    with open(path, "wb") as f:
-                        f.write(base64.b64decode(b64))
-                    documento_guardado = path
-                # Caso: objeto con 'content' y 'name'
-                elif isinstance(self.documento, dict) and "content" in self.documento:
-                    content = self.documento.get("content")
-                    name = self.documento.get("name", f"solicitud_{uuid.uuid4().hex}")
-                    # Sanitizar nombre de archivo
-                    name = sanitizar_nombre_archivo(name)
-                    if isinstance(content, str) and content.startswith("data:"):
-                        _, b64 = content.split(",", 1)
-                        data = base64.b64decode(b64)
-                    else:
-                        data = base64.b64decode(content)
-                    path = os.path.join(UPLOAD_DIR, name)
-                    with open(path, "wb") as f:
-                        f.write(data)
-                    documento_guardado = path
-                else:
-                    # Si viene solo el nombre o ruta, lo conservamos tal cual
-                    documento_guardado = str(self.documento)
+                for item in self.documentos:
+                    guardar_archivo(item)
+            except Exception as e:
+                self.solicitud_mensaje = f"Error guardando documento: {e}"
+                return
+        elif self.documento:
+            try:
+                os.makedirs(UPLOAD_DIR, exist_ok=True)
+                guardar_archivo(self.documento)
             except Exception as e:
                 self.solicitud_mensaje = f"Error guardando documento: {e}"
                 return
@@ -987,9 +1101,9 @@ Sistema PQRS
                     solicitud_obj.descripcion = self.descripcion
                     solicitud_obj.ubicacion = self.ubicacion or None
                     solicitud_obj.area_responsable = self.area_otro if self.area_responsable == "Otros" else self.area_responsable
-                    if documento_guardado:
-                        solicitud_obj.documento = documento_guardado
-                        solicitud_obj.documento_basename = os.path.basename(documento_guardado)
+                    if documentos_guardados:
+                        solicitud_obj.documento = json.dumps(documentos_guardados)
+                        solicitud_obj.documento_basename = json.dumps(documento_basenames_guardados)
                     solicitud_obj.estado = "Actualizada"
                     session.add(solicitud_obj)
                     session.commit()
@@ -1011,8 +1125,8 @@ Sistema PQRS
                     descripcion=self.descripcion,
                     ubicacion=self.ubicacion or None,
                     area_responsable=self.area_otro if self.area_responsable == "Otros" else self.area_responsable,
-                    documento=documento_guardado or None,
-                    documento_basename=os.path.basename(documento_guardado) if documento_guardado else None,
+                    documento=json.dumps(documentos_guardados) if documentos_guardados else None,
+                    documento_basename=json.dumps(documento_basenames_guardados) if documento_basenames_guardados else None,
                     estado="Radicada",
                     fecha=datetime.now(),
                     creado_por=self.email_actual or self.correo,
@@ -1069,6 +1183,28 @@ Sistema PQRS
                 
         except Exception as e:
             self.consulta_mensaje = f"Error consultando solicitud: {e}"
+
+
+    def set_confirmar_contraseña(self, value: str):
+        self.confirmar_contraseña = value
+
+    def set_correo(self, value: str):
+        self.correo = value
+
+    def set_contraseña(self, value: str):
+        self.contraseña = value
+
+    def set_tipo_identificacion(self, value: str):
+        self.tipo_identificacion = value
+
+    def set_genero(self, value: str):
+        self.genero = value
+
+    def set_direccion(self, value: str):
+        self.direccion = value
+
+    def set_current_password(self, value: str):
+        self.current_password = value
 
 
     """The app state."""
@@ -1385,12 +1521,17 @@ def navbar() -> rx.Component:
                 ),
                 spacing="6", # Espacio entre links
             ),
-            # Botón de cerrar sesión a la derecha
-            rx.button(
-                "Cerrar Sesión", 
-                on_click=State.logout, 
-                color_scheme="red", 
-                variant="solid"
+            # Botón de modo oscuro/claro y cerrar sesión
+            rx.hstack(
+                rx.color_mode.button(),
+                rx.button(
+                    "Cerrar Sesión", 
+                    on_click=State.logout, 
+                    color_scheme="red", 
+                    variant="solid"
+                ),
+                spacing="2",
+                align_items="center"
             ),
             justify="between", # Separa los links del botón de cerrar sesión
             align_items="center",
@@ -1414,6 +1555,7 @@ def utility_bar() -> rx.Component:
             rx.link("Inicia sesión", href="/login", font_size="sm", color="white", text_decoration="none"),
             rx.text("|", color="white"),
             rx.link("Regístrate", href="/registro", font_size="sm", color="white", text_decoration="none"),
+            rx.color_mode.button(),
             spacing="4",
             align_items="center"
         ),
@@ -1450,7 +1592,7 @@ def index() -> rx.Component:
                         ),
                         rx.hstack(
                             rx.link(rx.button("Radicar PQRS", color_scheme="blue", size="4", width="200px"), href="/solicitudes"),
-                            rx.link(rx.button("Consultar Estado", variant="outline", color_scheme="gray", size="4", width="200px"), href="/consultar-estado"),
+                            rx.link(rx.button("Consultar Estado",color_scheme="blue", size="4", width="200px"), href="/consultar-estado"),
                             spacing="4",
                             flex_wrap="wrap"
                         ),
@@ -1798,7 +1940,7 @@ def change_password_page() -> rx.Component:
         ),
         bg=rx.color_mode_cond(light="#f8fafc", dark="#0f172a")
     )
-@rx.page(route="/login", title="Iniciar Sesión")
+
 def login_page() -> rx.Component:
     return rx.vstack(
         navbar(),
@@ -1879,24 +2021,30 @@ def politica_privacidad_page() -> rx.Component:
         rx.center(
             rx.box(
                 rx.vstack(
-                    rx.heading("Política de Privacidad y Protección de Datos", size="6", color="black"),
+                    rx.heading("Política de Privacidad y Protección de Datos", size="6", color=rx.color_mode_cond(light="black", dark="white")),
                     rx.text(
                         "En esta plataforma tratamos tus datos con responsabilidad, transparencia y seguridad. "
                         "Tu información personal se usa únicamente para gestionar solicitudes PQRS y mejorar el servicio.",
-                        color="gray.700",
+                        color=rx.color_mode_cond(light="gray.700", dark="gray.300"),
                         font_size="md"
                     ),
                     rx.text(
                         "Al enviar una solicitud aceptas la Política de Tratamiento de Datos Personales y los términos de uso de la plataforma.",
-                        color="gray.700",
+                        color=rx.color_mode_cond(light="gray.700", dark="gray.300"),
                         font_size="md"
                     ),
-                    rx.heading("Datos recolectados", size="7", color="black"),
-                    rx.text("Correo electrónico, identificación, nombre, apellidos, teléfono y datos de ubicación para poder gestionar la solicitud."),
-                    rx.heading("Finalidad", size="7", color="black"),
-                    rx.text("Usar tus datos para contactar al ciudadano, radicar la solicitud en el sistema y generar trazabilidad de atención."),
-                    rx.heading("Derechos", size="7", color="black"),
-                    rx.text("Puedes solicitar corrección o eliminación de tus datos conforme a la normativa vigente de protección de datos personales."),
+                    rx.heading("Datos recolectados", size="7", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.text(
+                        "Correo electrónico, identificación, nombre, apellidos, teléfono y datos de ubicación para poder gestionar la solicitud.",
+                        color=rx.color_mode_cond(light="gray.700", dark="gray.300")
+                    ),
+                    rx.heading("Finalidad", size="7", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.text(
+                        "Usar tus datos para contactar al ciudadano, radicar la solicitud en el sistema y generar trazabilidad de atención.",
+                        color=rx.color_mode_cond(light="gray.700", dark="gray.300")
+                    ),
+                    rx.heading("Derechos", size="7", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.text("Puedes solicitar corrección o eliminación de tus datos conforme a la normativa vigente de protección de datos personales.", color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
                     rx.link("Volver al inicio", href="/", color_scheme="blue", font_weight="bold"),
                     spacing="4",
                     align_items="flex-start"
@@ -1904,8 +2052,7 @@ def politica_privacidad_page() -> rx.Component:
                 p="8",
                 max_width="840px",
                 border_radius="2xl",
-                bg="white",
-                _dark={"bg": "gray.800"}
+                bg=rx.color_mode_cond(light="white", dark="gray.800")
             ),
             min_height="84vh"
         )
@@ -1936,12 +2083,12 @@ def dashboard() -> rx.Component:
                                                 rx.text(f"Estado: {solicitud['estado']}", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                                                 rx.text(f"Fecha: {solicitud['fecha']}", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                                                 rx.cond(
-                                                    solicitud["documento"],
-                                                    rx.hstack(
-                                                        rx.text("Documento: ", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
+                                                    solicitud.get("documento_basename"),
+                                                    rx.vstack(
+                                                        rx.text("Documento adjunto:", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                                                         rx.link(
                                                             solicitud["documento_basename"],
-                                                            href=solicitud.get("documento_href"),
+                                                            href=solicitud.get("documento_href", "#"),
                                                             color="blue.600",
                                                             target="_blank"
                                                         )
@@ -2056,7 +2203,7 @@ def funcionario_dashboard() -> rx.Component:
                         rx.vstack(
                             rx.heading("Buscar y Filtrar Solicitudes", size="5", color=rx.color_mode_cond(light="black", dark="white"), margin_bottom="1em"),
                             rx.hstack(
-                                rx.icon("search", size=20, color="gray.500"),
+                                rx.icon("search", size=20, color=rx.color_mode_cond(light="gray.500", dark="gray.400")),
                                 rx.input(
                                     placeholder="Buscar por radicado, asunto, descripción o creador...",
                                     value=State.query_solicitud,
@@ -2107,9 +2254,9 @@ def funcionario_dashboard() -> rx.Component:
                             width="100%"
                         ),
                         p="5",
-                        border="1px solid #e2e8f0",
+                        border=f"1px solid {rx.color_mode_cond(light='#e2e8f0', dark='#334155')}",
                         border_radius="lg",
-                        bg="#f9fafb",
+                        bg=rx.color_mode_cond(light="#f9fafb", dark="#1e293b"),
                         width="100%",
                         margin_bottom="2em"
                     ),
@@ -2160,17 +2307,22 @@ def funcionario_dashboard() -> rx.Component:
                                                     rx.text("")
                                                 ),
                                                 rx.cond(
-                                                    solicitud["documento"],
-                                                    rx.hstack(
-                                                        rx.icon("paperclip", size=16),
-                                                        rx.link(
-                                                            solicitud["documento_basename"],
-                                                            href=solicitud.get("documento_href"),
-                                                            color="blue.600",
-                                                            font_weight="bold",
-                                                            target="_blank"
-                                                        ),
-                                                        rx.text("(Descargar)", color="blue.500", font_size="sm"),
+                                                    solicitud.get("documento_basename"),
+                                                    rx.vstack(
+                                                        rx.text("Documento adjunto:", color="gray.600", font_size="sm"),
+                                                        rx.hstack(
+                                                            rx.icon("paperclip", size=16),
+                                                            rx.link(
+                                                                solicitud["documento_basename"],
+                                                                href=solicitud.get("documento_href", "#"),
+                                                                color="blue.600",
+                                                                font_weight="bold",
+                                                                target="_blank"
+                                                            ),
+                                                            rx.text("(Descargar)", color="blue.500", font_size="sm"),
+                                                            spacing="2",
+                                                            align_items="center"
+                                                        )
                                                     ),
                                                     rx.text("Sin documentos adjuntos", color="gray.500", font_size="sm")
                                                 ),
@@ -2439,6 +2591,22 @@ def solicitudes_page() -> rx.Component:
                         rx.text("Completa el formulario para radicar tu Petición, Queja, Reclamo o Sugerencia.", color="gray.600"),
                         rx.form(
                             rx.vstack(
+                                # Mensaje de validación/éxito al inicio
+                                rx.cond(
+                                    State.solicitud_mensaje,
+                                    rx.box(
+                                        rx.text(
+                                            State.solicitud_mensaje,
+                                            color="white",
+                                            font_weight="semibold",
+                                            font_size="sm"
+                                        ),
+                                        p="4",
+                                        border_radius="lg",
+                                        bg=rx.cond(State.solicitud_mensaje.contains("éxito"), "green.500", "red.500"),
+                                        width="100%"
+                                    )
+                                ),
                                 # Tipo de solicitud (label + select)
                                 rx.vstack(
                                     label_requerido("Tipo de Solicitud"),
@@ -2499,11 +2667,23 @@ def solicitudes_page() -> rx.Component:
                                     rx.box(
                                         rx.hstack(
                                             rx.image(src="/clip-icon.svg", alt="Adjuntar", height="20px"),
-                                            rx.text("Arrastra y suelta tus archivos aquí o haz clic para explorar", color="gray.600"),
+                                            rx.cond(
+                                                State.documento_nombres,
+                                                rx.text(
+                                                    State.documento_nombres_joined,
+                                                    color="gray.600",
+                                                    no_wrap=False,
+                                                ),
+                                                rx.text("Arrastra y suelta tus archivos aquí o haz clic para explorar", color="gray.600"),
+                                            ),
                                             rx.spacer(),
-                                            rx.text(State.documento_nombre, font_size="sm", color="gray.500")
+                                            rx.cond(
+                                                State.documento_nombres,
+                                                rx.text(f"{State.documento_nombres_count} archivos seleccionados", font_size="sm", color="gray.500"),
+                                                rx.text("Ningún archivo seleccionado", font_size="sm", color="gray.500"),
+                                            ),
                                         ),
-                                        rx.input(type="file", accept="*/*", on_change=State.set_documento, style={"position": "absolute", "inset": "0", "width": "100%", "height": "100%", "opacity": 0, "cursor": "pointer"}),
+                                        rx.input(type="file", accept="*/*", multiple=True, on_change=State.set_documento, style={"position": "absolute", "inset": "0", "width": "100%", "height": "100%", "opacity": 0, "cursor": "pointer"}),
                                         position="relative",
                                         padding="4",
                                         border="2px dashed #cfe7ff",
@@ -2515,10 +2695,6 @@ def solicitudes_page() -> rx.Component:
                                 ),
                                 rx.checkbox(rx.link("He leído y acepto la Política de Tratamiento de Datos Personales", href="/politica-privacidad", color="blue"), is_checked=State.acepta_politica_solicitud, on_change=State.set_acepta_politica_solicitud),
                                 rx.button("Enviar Solicitud", on_click=State.crear_solicitud, color_scheme="blue", width="100%", is_disabled=~State.acepta_politica_solicitud),
-                                rx.cond(
-                                    State.solicitud_mensaje,
-                                    rx.text(State.solicitud_mensaje, color=rx.cond(State.solicitud_mensaje.contains("éxito"), "green.500", "red.500"))
-                                ),
                                 rx.cond(
                                     State.solicitudes,
                                     rx.vstack(
@@ -2554,18 +2730,14 @@ def solicitudes_page() -> rx.Component:
                                                     ),
                                                     rx.text(f"Estado: {solicitud['estado']}"),
                                                     rx.text(f"Fecha: {solicitud['fecha']}"),
-                                                    rx.cond(
-                                                        solicitud["documento"],
-                                                        rx.hstack(
-                                                            rx.text("Documento: ", color="gray.600"),
-                                                            rx.link(
-                                                                solicitud["documento_basename"],
-                                                                href=solicitud.get("documento_href"),
-                                                                color="blue.600",
-                                                                target="_blank"
-                                                            )
+                                                    rx.text(
+                                                        rx.cond(
+                                                            solicitud.get("documento_adjuntos_json", "[]") != "[]",
+                                                            f"Documentos adjuntos: {solicitud.get('documento_basename', 'Archivo adjunto')}",
+                                                            "Sin documentos adjuntos"
                                                         ),
-                                                        rx.text("Documento: No adjunto", color="gray.600")
+                                                        color="gray.600",
+                                                        font_size="sm"
                                                     ),
                                                 ),
                                                 p="4",
@@ -2750,14 +2922,17 @@ def consultar_estado_page() -> rx.Component:
                                 
                                 # Documento adjunto (si existe)
                                 rx.cond(
-                                    State.solicitud_consultada.get("documento"),
+                                    State.solicitud_consultada.get("documento_adjuntos"),
                                     rx.vstack(
-                                        rx.text("Documento Adjunto:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
-                                        rx.link(
-                                            State.solicitud_consultada.get("documento_basename", "Ver documento"),
-                                            href=State.solicitud_consultada.get("documento_href"),
-                                            color="blue.500",
-                                            target="_blank"
+                                        rx.text("Documentos adjuntos:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                        rx.foreach(
+                                            State.solicitud_consultada_adjuntos,
+                                            lambda doc: rx.link(
+                                                doc["basename"],
+                                                href=doc["href"],
+                                                color="blue.500",
+                                                target="_blank"
+                                            )
                                         ),
                                         spacing="2"
                                     )
@@ -2770,7 +2945,7 @@ def consultar_estado_page() -> rx.Component:
                                             State.solicitud_consultada.get("respuesta_documento_href"),
                                             rx.link(
                                                 State.solicitud_consultada.get("respuesta_documento_basename", "Ver documento"),
-                                                href=State.solicitud_consultada.get("respuesta_documento_href", "#"),
+                                                href=State.solicitud_consultada["respuesta_documento_href"],
                                                 color="blue.500",
                                                 target="_blank"
                                             ),
@@ -2811,17 +2986,18 @@ def consultar_estado_page() -> rx.Component:
 
 def reportes_page() -> rx.Component:
     tipo_counts = State.estadisticas_por_tipo
-    max_count = State.max_registros_tipo or 1
+    max_count = State.max_registros_tipo
 
-    def grafica_barra(label: str, value: int, color: str):
-        width_pct = int((value / max_count) * 100) if max_count else 0
+    def grafica_barra(label: str, value, color: str):
+        # Calcular el porcentaje de forma simple para evitar errores de tipo en Reflex
+        # Usar una expresión simple que Reflex pueda compilar
         return rx.vstack(
             rx.text(label, font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
             rx.hstack(
                 rx.box(
                     bg=color,
                     height="18px",
-                    width=f"{width_pct}%",
+                    width="30%",  # Ancho fijo para evitar cálculos complejos con Vars
                     border_radius="full",
                     transition="width 0.4s ease"
                 ),
@@ -2883,9 +3059,9 @@ def reportes_page() -> rx.Component:
                     rx.box(
                         rx.vstack(
                             rx.heading("Resumen por estado", size="6", color="black"),
-                            grafica_barra("Radicada", int(State.numero_solicitudes_radicadas), "#f59e0b"),
-                            grafica_barra("Actualizada", int(State.numero_solicitudes_actualizadas), "#3b82f6"),
-                            grafica_barra("Cerrada", int(State.numero_solicitudes_cerradas), "#10b981"),
+                            grafica_barra("Radicada", State.numero_solicitudes_radicadas, "#f59e0b"),
+                            grafica_barra("Actualizada", State.numero_solicitudes_actualizadas, "#3b82f6"),
+                            grafica_barra("Cerrada", State.numero_solicitudes_cerradas, "#10b981"),
                             spacing="4",
                             width="100%"
                         ),

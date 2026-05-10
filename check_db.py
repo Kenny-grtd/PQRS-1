@@ -1,34 +1,24 @@
-#!/usr/bin/env python3
-"""
-Script para verificar la estructura de la base de datos
-"""
-import sqlite3
-import os
-
-# Conectar a la base de datos
-db_path = "reflex.db"
-if not os.path.exists(db_path):
-    print(f"Base de datos {db_path} no encontrada")
-    exit(1)
-
-conn = sqlite3.connect(db_path)
-cursor = conn.cursor()
-
-# Ver tablas
-cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-tables = cursor.fetchall()
-
-print("=== TABLAS EN LA BASE DE DATOS ===")
-for table in tables:
-    table_name = table[0]
-    print(f"\nTabla: {table_name}")
-
-    # Ver columnas
-    cursor.execute(f"PRAGMA table_info({table_name});")
-    columns = cursor.fetchall()
-    print("  Columnas:")
-    for col in columns:
-        cid, name, type_, notnull, dflt_value, pk = col
-        print(f"    - {name}: {type_} {'(PK)' if pk else ''}")
-
-conn.close()
+﻿import sqlite3
+try:
+    conn = sqlite3.connect("reflex.db")
+    c = conn.cursor()
+    # Buscamos usando el nombre de columna exacto que tiene tu archivo
+    c.execute('SELECT email, "ContraseÃ±a" FROM usuario WHERE email="funcionario@ejemplo.com"')
+    res = c.fetchone()
+    if res:
+        print(f"\n✅ USUARIO ENCONTRADO")
+        print(f"Email: {res[0]}")
+        print(f"Contraseña en DB: {res[1]}")
+        
+        if res[1].startswith("$2b$"):
+            print("\n💡 EL HASH ES CORRECTO: La contraseña está encriptada con bcrypt.")
+            print("Ya deberías poder loguearte con 'password_segura'.")
+        else:
+            print("\n⚠️ ADVERTENCIA: La contraseña está en texto plano.")
+            print("El login de Reflex FALLARÁ hasta que la encriptes.")
+    else:
+        print("❌ No se encontró el usuario 'funcionario@ejemplo.com'")
+except Exception as e:
+    print(f"❌ Error: {e}")
+finally:
+    conn.close()
