@@ -33,6 +33,7 @@ class Solicitud(rx.Model, table=True):
     documento: Optional[str] = None
     documento_basename: Optional[str] = None
     area_responsable: Optional[str] = None
+    persona_vulnerable: Optional[str] = None
     estado: str = "Radicada"
     respuesta: Optional[str] = None
     fecha: datetime = Field(default_factory=datetime.now)

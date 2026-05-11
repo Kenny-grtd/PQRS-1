@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import quote
 import reflex as rx
 from .usuario_model import Usuario, Solicitud
-from sqlmodel import select, SQLModel, create_engine
+from sqlmodel import select, SQLModel, create_engine, text
 from rxconfig import config
 import smtplib
 from email.mime.text import MIMEText
@@ -31,6 +31,13 @@ DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 engine = create_engine(DATABASE_URL, echo=False)
 SQLModel.metadata.create_all(engine)
+
+# Asegura que la columna persona_vulnerable exista en la tabla solicitud cuando se añada al modelo
+with engine.connect() as conn:
+    result = conn.execute(text("PRAGMA table_info('solicitud')"))
+    columnas = [row[1] for row in result]
+    if 'persona_vulnerable' not in columnas:
+        conn.execute(text("ALTER TABLE solicitud ADD COLUMN persona_vulnerable TEXT"))
 
 def tiene_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -124,7 +131,10 @@ def enviar_correo_bienvenida(email_destinatario: str, email_usuario: str):
         
         print(f"✅ Correo enviado exitosamente a {email_destinatario}")
         return True
-    
+    except smtplib.SMTPAuthenticationError as e:
+        print("❌ Error al enviar correo de bienvenida: credenciales SMTP incorrectas o acceso no autorizado. Revisa EMAIL_SENDER, EMAIL_PASSWORD y la configuración de Gmail.")
+        print(str(e))
+        return False
     except Exception as e:
         print(f"❌ Error al enviar correo: {str(e)}")
         return False
@@ -161,6 +171,10 @@ def enviar_correo_notificacion(email_destinatario: str, asunto: str, cuerpo: str
 
         print(f"✅ Notificación enviada exitosamente a {email_destinatario}")
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        print("❌ Error al enviar notificación: credenciales SMTP incorrectas o acceso no autorizado. Revisa EMAIL_SENDER, EMAIL_PASSWORD y la configuración de seguridad de Gmail.")
+        print(str(e))
+        return False
     except Exception as e:
         print(f"❌ Error al enviar notificación: {str(e)}")
         return False
@@ -207,6 +221,7 @@ class State(rx.State):
     area_responsable: str = ""
     area_otro: str = ""
     tipo_solicitud: str = ""
+    persona_vulnerable: str = ""
     asunto: str = ""
     descripcion: str = ""
     ubicacion: str = ""
@@ -435,6 +450,9 @@ class State(rx.State):
 
     def set_tipo_solicitud(self, val: str):
         self.tipo_solicitud = val or ""
+
+    def set_persona_vulnerable(self, val: str):
+        self.persona_vulnerable = val or ""
 
     def set_asunto(self, val: str):
         self.asunto = val or ""
@@ -806,6 +824,7 @@ Sistema PQRS
             "id": solicitud.id,
             "radicado": solicitud.radicado,
             "tipo_solicitud": solicitud.tipo_solicitud,
+            "persona_vulnerable": solicitud.persona_vulnerable,
             "asunto": solicitud.asunto,
             "descripcion": solicitud.descripcion,
             "ubicacion": solicitud.ubicacion,
@@ -1022,6 +1041,7 @@ Sistema PQRS
 
     def limpiar_formulario_solicitud(self, keep_message: bool = False):
         self.tipo_solicitud = ""
+        self.persona_vulnerable = ""
         self.asunto = ""
         self.descripcion = ""
         self.ubicacion = ""
@@ -1124,6 +1144,7 @@ Sistema PQRS
                         self.solicitud_mensaje = "Solicitud no encontrada para editar."
                         return
                     solicitud_obj.tipo_solicitud = self.tipo_solicitud
+                    solicitud_obj.persona_vulnerable = self.persona_vulnerable or None
                     solicitud_obj.asunto = self.asunto
                     solicitud_obj.descripcion = self.descripcion
                     solicitud_obj.ubicacion = self.ubicacion or None
@@ -1148,6 +1169,7 @@ Sistema PQRS
                 solicitud_obj = Solicitud(
                     radicado=f"PQRS-{datetime.now().year}-{uuid.uuid4().hex[:8]}",
                     tipo_solicitud=self.tipo_solicitud,
+                    persona_vulnerable=self.persona_vulnerable or None,
                     asunto=self.asunto,
                     descripcion=self.descripcion,
                     ubicacion=self.ubicacion or None,
@@ -1179,6 +1201,7 @@ Sistema PQRS
                     self.ubicacion = solicitud_obj.ubicacion or ""
                     self.area_responsable = solicitud_obj.area_responsable or ""
                     self.area_otro = solicitud_obj.area_responsable if solicitud_obj.area_responsable and solicitud_obj.area_responsable not in ["Secretaría", "Contabilidad", "Bienestar", "Tesorería", "Atención al Ciudadano"] else ""
+                    self.persona_vulnerable = solicitud_obj.persona_vulnerable or ""
                     self.documento = solicitud_obj.documento or ""
                     self.solicitud_mensaje = "Editando solicitud. Actualiza los campos y guarda cambios."
                 else:
@@ -2480,6 +2503,10 @@ def funcionario_dashboard() -> rx.Component:
                                                     rx.vstack(
                                                         rx.heading(f"Radicado: {solicitud['radicado']}", size="4", color="#1e40af"),
                                                         rx.text(f"Tipo: {solicitud['tipo_solicitud']}", font_weight="semibold", color="gray.700", font_size="sm"),
+                                                        rx.cond(
+                                                            (solicitud.get("persona_vulnerable") != None) & (solicitud.get("persona_vulnerable") != "Ninguna"),
+                                                            rx.text(f"Característica: {solicitud['persona_vulnerable']}", color="gray.600", font_size="sm")
+                                                        ),
                                                         spacing="1"
                                                     ),
                                                     rx.spacer(),
@@ -2524,7 +2551,8 @@ def funcionario_dashboard() -> rx.Component:
                                                                 href=solicitud.get("documento_href", "#"),
                                                                 color="blue.600",
                                                                 font_weight="bold",
-                                                                target="_blank"
+                                                                target="_blank",
+                                                                download=solicitud.get("documento_basename", "documento")
                                                             ),
                                                             rx.text("(Descargar)", color="blue.500", font_size="sm"),
                                                             spacing="2",
@@ -2819,6 +2847,28 @@ def solicitudes_page() -> rx.Component:
                                     label_requerido("Tipo de Solicitud"),
                                     rx.select(["Petición", "Queja", "Reclamo", "Sugerencia"], placeholder="Selecciona el tipo de solicitud", value=State.tipo_solicitud, on_change=State.set_tipo_solicitud, required=True),
                                 ),
+                                rx.vstack(
+                                    label_requerido("Características del ciudadano"),
+                                    rx.select(
+                                        [
+                                            "Ninguna",
+                                            "Habitante de la calle",
+                                            "No brinda información",
+                                            "Peligro Inminente",
+                                            "Periodistas en ejercicio de su actividad",
+                                            "Primera Infancia",
+                                            "Veteranos Fuerza Pública",
+                                            "Víctimas - Conflicto Armado",
+                                        ],
+                                        placeholder="Selecciona una característica",
+                                        value=State.persona_vulnerable,
+                                        on_change=State.set_persona_vulnerable,
+                                        required=False,
+                                        bg="white",
+                                        border="1px solid #cbd5e1",
+                                        border_radius="md",
+                                    ),
+                                ),
 
                                 # Asunto (label + input)
                                 rx.vstack(
@@ -2902,64 +2952,6 @@ def solicitudes_page() -> rx.Component:
                                 ),
                                 rx.checkbox(rx.link("He leído y acepto la Política de Tratamiento de Datos Personales", href="/politica-privacidad", color="blue"), is_checked=State.acepta_politica_solicitud, on_change=State.set_acepta_politica_solicitud),
                                 rx.button("Enviar Solicitud", on_click=State.crear_solicitud, color_scheme="blue", width="100%", is_disabled=~State.acepta_politica_solicitud),
-                                rx.cond(
-                                    State.solicitudes,
-                                    rx.vstack(
-                                        rx.heading("Solicitudes registradas", size="6", color="black"),
-
-                                        rx.foreach(
-                                            State.solicitudes,
-                                            lambda solicitud: rx.box(
-                                                rx.vstack(
-                                                    rx.text(f"#{solicitud['id']} - {solicitud['tipo_solicitud']}", font_weight="bold"),
-                                                    rx.text(f"Asunto: {solicitud['asunto']}"),
-                                                    rx.text(f"Descripción: {solicitud['descripcion']}"),
-                                                    rx.text(f"Creado por: {solicitud.get('creado_por', 'Desconocido')}"),
-                                                    rx.hstack(
-                                                        rx.text("Ubicación: ", font_weight="bold"),
-                                                        rx.text(
-                                                            rx.cond(
-                                                                solicitud["ubicacion"],
-                                                                solicitud["ubicacion"],
-                                                                "No especificada"
-                                                            )
-                                                        ),
-                                                    ),
-                                                    rx.hstack(
-                                                        rx.text("Área responsable: ", font_weight="bold"),
-                                                        rx.text(
-                                                            rx.cond(
-                                                                solicitud["area_responsable"],
-                                                                solicitud["area_responsable"],
-                                                                "No especificada"
-                                                            )
-                                                        ),
-                                                    ),
-                                                    rx.text(f"Estado: {solicitud['estado']}"),
-                                                    rx.text(f"Fecha: {solicitud['fecha']}"),
-                                                    rx.text(
-                                                        rx.cond(
-                                                            solicitud.get("documento_adjuntos_json", "[]") != "[]",
-                                                            f"Documentos adjuntos: {solicitud.get('documento_basename', 'Archivo adjunto')}",
-                                                            "Sin documentos adjuntos"
-                                                        ),
-                                                        color="gray.600",
-                                                        font_size="sm"
-                                                    ),
-                                                ),
-                                                p="4",
-                                                border="1px solid #e2e8f0",
-                                                border_radius="lg",
-                                                bg="white",
-                                                _dark={"bg": "gray.800", "borderColor": "gray.700"},
-                                                width="100%"
-                                            )
-                                        ),
-
-                                        spacing="3",
-                                        width="100%"
-                                    )
-                                ),
                                 spacing="4",
                                 align_items="stretch"
                             ),
