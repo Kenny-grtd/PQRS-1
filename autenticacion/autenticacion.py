@@ -169,6 +169,13 @@ def enviar_correo_notificacion(email_destinatario: str, asunto: str, cuerpo: str
 # quitar prints de prueba
 
 class State(rx.State):
+
+
+    # Dentro de class State, agrega estas variables:
+    toast_mensaje: str = ""
+    toast_tipo: str = ""  # "success" o "error"
+    toast_visible: bool = False
+
     "En esta clase se define el estado de la aplicación, es decir, las variables que se van a usar en la aplicación y sus valores iniciales."
     state_auto_setters = False
     contraseña: str = ""
@@ -215,7 +222,8 @@ class State(rx.State):
     editar_solicitud_id: int = 0
     eliminar_solicitud_id: int = 0
     solicitud_mensaje: str = ""
-    
+
+
     error_de_registro: str = ""
     succes: str = ""
     error_de_contraseña: str = ""
@@ -250,7 +258,17 @@ class State(rx.State):
     consulta_radicado: str = ""
     solicitud_consultada: dict[str, Any] = {}
     consulta_mensaje: str = ""
+
+    def mostrar_toast(self, mensaje: str, tipo: str = "success"):
+        self.toast_mensaje = mensaje
+        self.toast_tipo = tipo
+        self.toast_visible = True
+
+    def ocultar_toast(self):
+        self.toast_visible = False
+        self.toast_mensaje = ""
      
+
     @rx.var
     def numero_solicitudes(self) -> str:
         return str(len(self.solicitudes or []))
@@ -874,6 +892,7 @@ Sistema PQRS
         print(f"Usuario registrado: {self.correo}")
         enviar_correo_bienvenida(self.correo, self.correo)
         self.succes = exito_mensaje
+        self.mostrar_toast("¡Registro exitoso! Bienvenido al sistema.", "success")
         self.error_de_registro = ""
         self.contraseña = ""
         self.confirmar_contraseña = ""
@@ -930,14 +949,22 @@ Sistema PQRS
             self.email_actual = user.email
             self.es_autentica = True
             self.cargar_solicitudes()
-            self.succes2 = f"Inicio de sesión exitoso. Redirigiendo al {'dashboard de funcionario' if user.rol == 'funcionario' else 'dashboard de ciudadano'}..."
             self.error_de_contraseña = ""
             self.contraseña = ""
             self.confirmar_contraseña = ""
             self.show_password = False
-            if user.rol == "funcionario":
-                return rx.redirect("/dashboard-funcionario")
-            return rx.redirect("/dashboard")
+            return rx.toast.success(
+                "¡Inicio de sesión exitoso!",
+                duration=2500,
+                description="Redirigiendo automáticamente...",
+                on_auto_close=State.redirect_after_login,
+            )
+
+    def redirect_after_login(self):
+        if self.rol_usuario == "funcionario":
+            return rx.redirect("/dashboard-funcionario")
+        return rx.redirect("/dashboard")
+
     def logout(self):
         "cerrar sesion de usuario"
         self.id_usuario = 0
@@ -1565,7 +1592,83 @@ def utility_bar() -> rx.Component:
         bg=rx.color_mode_cond(light="#0f172a", dark="#020617"),
         border_bottom="1px solid rgba(255,255,255,0.08)"
     )
-
+def toast_notification() -> rx.Component:
+    return rx.cond(
+        State.toast_visible,
+        rx.box(
+            rx.hstack(
+                rx.box(
+                    rx.cond(
+                        State.toast_tipo == "success",
+                        rx.icon("circle-check", size=22, color="white"),
+                        rx.icon("circle-x", size=22, color="white"),
+                    ),
+                    display="flex",
+                    align_items="center",
+                    justify_content="center",
+                    width="36px",
+                    height="36px",
+                    border_radius="full",
+                    bg=rx.cond(State.toast_tipo == "success", "rgba(255,255,255,0.25)", "rgba(255,255,255,0.25)"),
+                    flex_shrink="0",
+                ),
+                rx.vstack(
+                    rx.text(
+                        rx.cond(State.toast_tipo == "success", "¡Éxito!", "Error"),
+                        font_weight="bold",
+                        color="white",
+                        font_size="md",
+                        line_height="1.1",
+                    ),
+                    rx.text(
+                        State.toast_mensaje,
+                        color="rgba(255,255,255,0.95)",
+                        font_size="md",
+                        line_height="1.5",
+                    ),
+                    spacing="1",
+                    align_items="start",
+                ),
+                rx.spacer(),
+                rx.button(
+                    rx.icon("x", size=16, color="white"),
+                    on_click=State.ocultar_toast,
+                    variant="ghost",
+                    size="1",
+                    _hover={"bg": "rgba(255,255,255,0.15)"},
+                    padding="0",
+                    min_width="24px",
+                    height="24px",
+                ),
+                spacing="3",
+                align_items="center",
+                width="100%",
+            ),
+            position="fixed",
+            top="50%",
+            left="50%",
+            transform="translate(-50%, -50%)",
+            z_index="9999",
+            min_width="420px",
+            max_width="520px",
+            padding="22px 24px",
+            border_radius="18px",
+            bg=rx.cond(
+                State.toast_tipo == "success",
+                "linear-gradient(135deg, #16a34a, #15803d)",
+                "linear-gradient(135deg, #dc2626, #b91c1c)",
+            ),
+            box_shadow="0 8px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.12)",
+            style={
+                "animation": "slideInToast 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                "@keyframes slideInToast": {
+                    "from": {"opacity": "0", "transform": "translateY(24px) scale(0.95)"},
+                    "to": {"opacity": "1", "transform": "translateY(0) scale(1)"},
+                }
+            }
+        ),
+        rx.box()
+    )
 
 def index() -> rx.Component:
     hero_text = rx.color_mode_cond(light="rgba(15, 23, 42, 0.96)", dark="white")
@@ -1882,6 +1985,7 @@ def brand_footer() -> rx.Component:
 
 def registro_page() -> rx.Component:
     return rx.container(
+        toast_notification(),
         navbar(),
         rx.center(
             # Llamamos a auth_card con la función de signup y pidiendo confirmación
@@ -1943,6 +2047,8 @@ def change_password_page() -> rx.Component:
 
 def login_page() -> rx.Component:
     return rx.vstack(
+        toast_notification(),
+        rx.toast.provider(position="top-center", close_button=True, offset="20px"),
         navbar(),
         rx.center(
             rx.card(
@@ -2061,75 +2167,176 @@ def politica_privacidad_page() -> rx.Component:
 def dashboard() -> rx.Component:
     return rx.cond(
         State.es_autentica & (State.rol_usuario == "ciudadano"),
-        rx.container(
+        rx.box(
             navbar(),
             rx.center(
                 rx.vstack(
-                    rx.heading("Panel de Ciudadano", size="8", color=rx.color_mode_cond(light="black", dark="white")),
-                    rx.text("¡Bienvenido! Aquí podrás gestionar tus Peticiones, Quejas, Reclamos y Sugerencias.", color=rx.color_mode_cond(light="gray.600", dark="gray.300")), 
-                    rx.box(
-                        rx.vstack(
-                            rx.heading("Mis Solicitudes", size="6", color=rx.color_mode_cond(light="black", dark="white")),
-                            rx.cond(
-                                State.solicitudes,
-                                rx.vstack(
-                                    rx.foreach(
-                                        State.solicitudes,
-                                        lambda solicitud: rx.box(
-                                            rx.vstack(
-                                                rx.heading(f"Radicado: {solicitud['radicado']} - {solicitud['tipo_solicitud']}", size="6", color=rx.color_mode_cond(light="black", dark="white")),
-                                                rx.text(f"Asunto: {solicitud['asunto']}", color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
-                                                rx.text(f"Descripción: {solicitud['descripcion']}", color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
-                                                rx.text(f"Estado: {solicitud['estado']}", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
-                                                rx.text(f"Fecha: {solicitud['fecha']}", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
-                                                rx.cond(
-                                                    solicitud.get("documento_basename"),
-                                                    rx.vstack(
-                                                        rx.text("Documento adjunto:", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
-                                                        rx.link(
-                                                            solicitud["documento_basename"],
-                                                            href=solicitud.get("documento_href", "#"),
-                                                            color="blue.600",
-                                                            target="_blank"
-                                                        )
-                                                    ),
-                                                    rx.text("Documento: No adjunto", color=rx.color_mode_cond(light="gray.600", dark="gray.400"))
-                                                ),
-                                                spacing="2",
-                                                align_items="start"
-                                            ),
-                                            p="4",
-                                            border="1px solid #e2e8f0",
-                                            border_radius="lg",
-                                            bg="white",
-                                            _dark={"bg": "gray.800", "borderColor": "gray.700"},
-                                            width="100%"
-                                        )
-                                    ),
-                                    spacing="4"
-                                ),
-                                rx.text("No tienes solicitudes registradas aún.", color=rx.color_mode_cond(light="gray.600", dark="gray.400"), font_size="md")
-                            ),
-                            spacing="4"
+                    rx.heading(
+                        "Panel de Ciudadano",
+                        size="6",
+                        color=rx.color_mode_cond(light="black", dark="white")
+                    ),
+                    rx.text(
+                        "¡Bienvenido! Aquí podrás gestionar tus Peticiones, Quejas, Reclamos y Sugerencias.",
+                        color=rx.color_mode_cond(light="gray.600", dark="gray.300"),
+                        font_size="sm"
+                    ),
+                    rx.vstack(
+                        rx.heading(
+                            "Mis Solicitudes",
+                            size="5",
+                            color=rx.color_mode_cond(light="black", dark="white")
                         ),
+                        rx.cond(
+                            State.solicitudes,
+                            rx.vstack(
+                                rx.foreach(
+                                    State.solicitudes,
+                                    lambda solicitud: rx.box(
+                                        rx.vstack(
+                                            rx.hstack(
+                                                rx.badge(
+                                                    solicitud["tipo_solicitud"],
+                                                    color_scheme=rx.cond(
+                                                        solicitud["tipo_solicitud"] == "Petición", "blue",
+                                                        rx.cond(solicitud["tipo_solicitud"] == "Queja", "orange",
+                                                        rx.cond(solicitud["tipo_solicitud"] == "Reclamo", "red", "green"))
+                                                    )
+                                                ),
+                                                rx.badge(
+                                                    solicitud["estado"],
+                                                    color_scheme=rx.cond(
+                                                        solicitud["estado"] == "Radicada", "blue",
+                                                        rx.cond(solicitud["estado"] == "Actualizada", "orange", "green")
+                                                    )
+                                                ),
+                                                rx.spacer(),
+                                                rx.text(
+                                                    solicitud["fecha"],
+                                                    font_size="xs",
+                                                    color="gray.400"
+                                                ),
+                                            ),
+                                            rx.text(
+                                                solicitud["radicado"],
+                                                font_size="xs",
+                                                color="gray.400",
+                                                font_family="monospace",
+                                                style={"wordBreak": "break-all"}
+                                            ),
+                                            rx.text(
+                                                solicitud["asunto"],
+                                                font_weight="semibold",
+                                                font_size="sm",
+                                                color=rx.color_mode_cond(light="gray.800", dark="white")
+                                            ),
+                                            rx.text(
+                                             solicitud["descripcion"],
+                                             font_size="sm",
+                                              color=rx.color_mode_cond(light="gray.600", dark="gray.300"),
+                                              style={
+                                              "display": "-webkit-box",
+                                              "WebkitLineClamp": "3",
+                                              "WebkitBoxOrient": "vertical",
+                                              "overflow": "hidden",
+                                              "wordBreak": "break-word",   # <-- corta palabras largas
+                                              "overflowWrap": "anywhere",  # <-- maneja URLs y texto sin espacios
+                                                }
+                                            ),
+                                            rx.cond(
+                                                solicitud.get("documento_basename"),
+                                                rx.hstack(
+                                                    rx.icon("paperclip", size=13, color="blue.400"),
+                                                    rx.link(
+                                                        solicitud["documento_basename"],
+                                                        href=solicitud.get("documento_href", "#"),
+                                                        color="blue.500",
+                                                        font_size="xs",
+                                                        target="_blank"
+                                                    ),
+                                                    spacing="1",
+                                                    align_items="center"
+                                                ),
+                                                rx.box()
+                                            ),
+                                            spacing="2",
+                                            align_items="start",
+                                            width="100%"
+                                        ),
+                                        p="4",
+                                        border="1px solid",
+                                        border_color=rx.color_mode_cond(light="#e2e8f0", dark="#2d3748"),
+                                        border_radius="lg",
+                                        bg=rx.color_mode_cond(light="white", dark="#1e293b"),
+                                        width="100%",
+                                        _hover={
+                                            "box_shadow": "sm",
+                                            "border_color": "#3b82f6"
+                                        }
+                                    )
+                                ),
+                                spacing="3",
+                                width="100%"
+                            ),
+                            rx.box(
+                                rx.vstack(
+                                    rx.icon("inbox", size=32, color="gray.300"),
+                                    rx.text(
+                                        "No tienes solicitudes registradas aún.",
+                                        color="gray.400",
+                                        font_size="sm",
+                                        text_align="center"
+                                    ),
+                                    rx.link(
+                                        rx.button(
+                                            "Crear primera solicitud",
+                                            color_scheme="blue",
+                                            size="2"
+                                        ),
+                                        href="/solicitudes"
+                                    ),
+                                    spacing="3",
+                                    align_items="center",
+                                ),
+                                p="8",
+                                width="100%",
+                                text_align="center"
+                            )
+                        ),
+                        spacing="4",
                         width="100%"
                     ),
-                    rx.button("Cerrar Sesión", on_click=State.logout, color_scheme="red", width="100%"),
-                    spacing="6",
-                    align_items="stretch"
+                    rx.button(
+                        "Cerrar Sesión",
+                        on_click=State.logout,
+                        color_scheme="red",
+                        size="2",
+                        variant="soft",
+                        width="100%"
+                    ),
+                    spacing="5",
+                    align_items="stretch",
+                    width="100%",
+                    max_width="680px",
+                    padding_x="4",
+                    padding_y="8",
                 ),
-                min_height="84vh"
+                width="100%",
+                min_height="calc(100vh - 60px)",
+                align_items="start",
+                padding_top="6"
             ),
-            bg=rx.color_mode_cond(light="#f8fafc", dark="#0f172a")
+            bg=rx.color_mode_cond(light="#f8fafc", dark="#0f172a"),
+            width="100%",
+            min_height="100vh"
         ),
         rx.container(
             navbar(),
             rx.center(
                 rx.vstack(
                     rx.heading("Acceso Denegado", size="8", color="red.500"),
-                    rx.text("Esta página es solo para ciudadanos. Si eres funcionario, ve a tu dashboard.", color="gray.600"),
-                    rx.link(rx.button("Ir al Dashboard Funcionario", color_scheme="blue"), href="/dashboard-funcionario"),
-                    rx.link(rx.button("Ir al Login", color_scheme="gray"), href="/login"),
+                    rx.text("Esta página es solo para ciudadanos.", color="gray.600"),
+                    rx.link(rx.button("Ir al Login", color_scheme="blue"), href="/login"),
                     spacing="4",
                     align_items="center"
                 ),
@@ -2146,53 +2353,53 @@ def funcionario_dashboard() -> rx.Component:
             navbar(),
             rx.center(
                 rx.vstack(
-                    rx.heading("Panel de Funcionario", size="8", color=rx.color_mode_cond(light="black", dark="white")),
-                    rx.text("Bienvenido, funcionario. Esta es tu página principal donde puedes revisar todas las peticiones.", color=rx.color_mode_cond(light="gray.600", dark="gray.300")),
-                    rx.text("Usa el menú superior para navegar: 'Nueva Solicitud' para crear peticiones, 'Registrar Funcionario' para añadir nuevos funcionarios.", color=rx.color_mode_cond(light="gray.500", dark="gray.400")), 
+                    rx.heading("Panel de Funcionario", size="6", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.text("Bienvenido, funcionario. Esta es tu página principal donde puedes revisar todas las peticiones.", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                    rx.text("Usa el menú superior para navegar: 'Nueva Solicitud' para crear peticiones, 'Registrar Funcionario' para añadir nuevos funcionarios.", color=rx.color_mode_cond(light="gray.500", dark="gray.400"), font_size="sm"), 
                     rx.hstack(
                         rx.box(
                             rx.vstack(
-                                rx.text("Total de solicitudes", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300")),
-                                rx.heading(State.numero_solicitudes, size="4", color=rx.color_mode_cond(light="black", dark="white"))
+                                rx.text("Total de solicitudes", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes, size="3", color=rx.color_mode_cond(light="black", dark="white"))
                             ),
-                            p="5",
+                            p="4",
                             border="1px solid #e2e8f0",
                             border_radius="xl",
                             bg=rx.color_mode_cond(light="#f8fbff", dark="#1e293b"),
-                            min_width="180px"
+                            min_width="140px"
                         ),
                         rx.box(
                             rx.vstack(
-                                rx.text("Radicadas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300")),
-                                rx.heading(State.numero_solicitudes_radicadas, size="4", color=rx.color_mode_cond(light="black", dark="white"))
+                                rx.text("Radicadas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes_radicadas, size="3", color=rx.color_mode_cond(light="black", dark="white"))
                             ),
-                            p="5",
+                            p="4",
                             border="1px solid #e2e8f0",
                             border_radius="xl",
                             bg=rx.color_mode_cond(light="#fff7ed", dark="#1f2937"),
-                            min_width="180px"
+                            min_width="140px"
                         ),
                         rx.box(
                             rx.vstack(
-                                rx.text("Actualizadas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300")),
-                                rx.heading(State.numero_solicitudes_actualizadas, size="4", color=rx.color_mode_cond(light="black", dark="white"))
+                                rx.text("Actualizadas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes_actualizadas, size="3", color=rx.color_mode_cond(light="black", dark="white"))
                             ),
-                            p="5",
+                            p="4",
                             border="1px solid #e2e8f0",
                             border_radius="xl",
                             bg=rx.color_mode_cond(light="#f0fdf4", dark="#1e293b"),
-                            min_width="180px"
+                            min_width="140px"
                         ),
                         rx.box(
                             rx.vstack(
-                                rx.text("Cerradas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300")),
-                                rx.heading(State.numero_solicitudes_cerradas, size="4", color=rx.color_mode_cond(light="black", dark="white"))
+                                rx.text("Cerradas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes_cerradas, size="3", color=rx.color_mode_cond(light="black", dark="white"))
                             ),
-                            p="5",
+                            p="4",
                             border="1px solid #e2e8f0",
                             border_radius="xl",
                             bg=rx.color_mode_cond(light="#eef2ff", dark="#1e293b"),
-                            min_width="180px"
+                            min_width="140px"
                         ),
                         spacing="4",
                         width="100%",
@@ -2201,7 +2408,7 @@ def funcionario_dashboard() -> rx.Component:
                     # Barra de búsqueda y filtros
                     rx.box(
                         rx.vstack(
-                            rx.heading("Buscar y Filtrar Solicitudes", size="5", color=rx.color_mode_cond(light="black", dark="white"), margin_bottom="1em"),
+                            rx.heading("Buscar y Filtrar Solicitudes", size="4", color=rx.color_mode_cond(light="black", dark="white"), margin_bottom="1em"),
                             rx.hstack(
                                 rx.icon("search", size=20, color=rx.color_mode_cond(light="gray.500", dark="gray.400")),
                                 rx.input(
@@ -2271,8 +2478,8 @@ def funcionario_dashboard() -> rx.Component:
                                             rx.vstack(
                                                 rx.hstack(
                                                     rx.vstack(
-                                                        rx.heading(f"Radicado: {solicitud['radicado']}", size="5", color="#1e40af"),
-                                                        rx.text(f"Tipo: {solicitud['tipo_solicitud']}", font_weight="semibold", color="gray.700"),
+                                                        rx.heading(f"Radicado: {solicitud['radicado']}", size="4", color="#1e40af"),
+                                                        rx.text(f"Tipo: {solicitud['tipo_solicitud']}", font_weight="semibold", color="gray.700", font_size="sm"),
                                                         spacing="1"
                                                     ),
                                                     rx.spacer(),
@@ -2407,7 +2614,7 @@ def funcionario_dashboard() -> rx.Component:
                                             )
                                         ),
                                         rx.vstack(
-                                            rx.text("Documento adjunto (opcional)", font_weight="semibold", color="gray.700"),
+                                            rx.text("Documento adjunto (Si quieres adjuntar mas de 2 archivos puedes ponerlos en un ZIP)", font_weight="semibold", color="gray.700"),
                                             rx.box(
                                                 rx.hstack(
                                                     rx.image(src="/clip-icon.svg", alt="Adjuntar", height="20px"),
@@ -2663,7 +2870,7 @@ def solicitudes_page() -> rx.Component:
 
                                 # Archivo adjunto: zona arrastrar y soltar moderna
                                 rx.vstack(
-                                    rx.text("Documento adjunto (opcional)", font_weight="semibold"),
+                                    rx.text("Documento adjunto (si quieres enviar mas de 2 archivos puedes poner los en un Zip)", font_weight="semibold"),
                                     rx.box(
                                         rx.hstack(
                                             rx.image(src="/clip-icon.svg", alt="Adjuntar", height="20px"),
@@ -2793,7 +3000,7 @@ def consultar_estado_page() -> rx.Component:
         rx.center(
             rx.card(
                 rx.vstack(
-                    rx.heading("Consultar Estado de Solicitud", size="8", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.heading("Consultar Estado de Solicitud", size="4", color=rx.color_mode_cond(light="black", dark="white")),
                     rx.text("Ingresa el número de radicado de tu solicitud para consultar su estado actual.", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                     
                     # Formulario de consulta
@@ -2841,15 +3048,15 @@ def consultar_estado_page() -> rx.Component:
                                 rx.heading("Detalles de la Solicitud", size="6", color=rx.color_mode_cond(light="black", dark="white")),
                                 rx.grid(
                                     rx.vstack(
-                                        rx.text("Número de Radicado:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
-                                        rx.text(State.solicitud_consultada.get("radicado", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"))
+                                        rx.text("Número de Radicado:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
+                                        rx.text(State.solicitud_consultada.get("radicado", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm")
                                     ),
                                     rx.vstack(
-                                        rx.text("Tipo de Solicitud:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
-                                        rx.text(State.solicitud_consultada.get("tipo_solicitud", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"))
+                                        rx.text("Tipo de Solicitud:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
+                                        rx.text(State.solicitud_consultada.get("tipo_solicitud", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm")
                                     ),
                                     rx.vstack(
-                                        rx.text("Estado Actual:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                        rx.text("Estado Actual:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
                                         rx.badge(
                                             State.solicitud_consultada.get("estado", ""),
                                             color_scheme=rx.cond(
@@ -2868,16 +3075,16 @@ def consultar_estado_page() -> rx.Component:
                                         )
                                     ),
                                     rx.vstack(
-                                        rx.text("Fecha de Creación:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
-                                        rx.text(State.solicitud_consultada.get("fecha", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"))
+                                        rx.text("Fecha de Creación:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
+                                        rx.text(State.solicitud_consultada.get("fecha", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm")
                                     ),
                                     rx.vstack(
-                                        rx.text("Asunto:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
-                                        rx.text(State.solicitud_consultada.get("asunto", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"))
+                                        rx.text("Asunto:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
+                                        rx.text(State.solicitud_consultada.get("asunto", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm")
                                     ),
                                     rx.vstack(
-                                        rx.text("Área Responsable:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
-                                        rx.text(State.solicitud_consultada.get("area_responsable", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"))
+                                        rx.text("Área Responsable:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
+                                        rx.text(State.solicitud_consultada.get("area_responsable", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm")
                                     ),
                                     template_columns="repeat(2, 1fr)",
                                     gap="4",
@@ -2888,9 +3095,9 @@ def consultar_estado_page() -> rx.Component:
                                 rx.cond(
                                     State.solicitud_consultada.get("descripcion"),
                                     rx.vstack(
-                                        rx.text("Descripción:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                        rx.text("Descripción:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
                                         rx.box(
-                                            rx.text(State.solicitud_consultada.get("descripcion", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
+                                            rx.text(State.solicitud_consultada.get("descripcion", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm"),
                                             p="3",
                                             border=f"1px solid {rx.color_mode_cond(light='#e2e8f0', dark='#4a5568')}",
                                             border_radius="md",
@@ -2906,9 +3113,9 @@ def consultar_estado_page() -> rx.Component:
                                 rx.cond(
                                     State.solicitud_consultada.get("respuesta"),
                                     rx.vstack(
-                                        rx.text("Respuesta del Funcionario:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                        rx.text("Respuesta del Funcionario:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
                                         rx.box(
-                                            rx.text(State.solicitud_consultada.get("respuesta", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
+                                            rx.text(State.solicitud_consultada.get("respuesta", ""), color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm"),
                                             p="3",
                                             border="2px solid #48bb78",
                                             border_radius="md",
@@ -2924,14 +3131,15 @@ def consultar_estado_page() -> rx.Component:
                                 rx.cond(
                                     State.solicitud_consultada.get("documento_adjuntos"),
                                     rx.vstack(
-                                        rx.text("Documentos adjuntos:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                        rx.text("Documentos adjuntos:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
                                         rx.foreach(
                                             State.solicitud_consultada_adjuntos,
                                             lambda doc: rx.link(
                                                 doc["basename"],
                                                 href=doc["href"],
                                                 color="blue.500",
-                                                target="_blank"
+                                                target="_blank",
+                                                font_size="sm"
                                             )
                                         ),
                                         spacing="2"
@@ -2940,16 +3148,17 @@ def consultar_estado_page() -> rx.Component:
                                 rx.cond(
                                     State.solicitud_consultada.get("respuesta_documento_basename"),
                                     rx.vstack(
-                                        rx.text("Documento adjunto en la respuesta:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                        rx.text("Documento adjunto en la respuesta:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
                                         rx.cond(
                                             State.solicitud_consultada.get("respuesta_documento_href"),
                                             rx.link(
                                                 State.solicitud_consultada.get("respuesta_documento_basename", "Ver documento"),
                                                 href=State.solicitud_consultada["respuesta_documento_href"],
                                                 color="blue.500",
-                                                target="_blank"
+                                                target="_blank",
+                                                font_size="sm"
                                             ),
-                                            rx.text("Documento no disponible", color="gray.500")
+                                            rx.text("Documento no disponible", color="gray.500", font_size="sm")
                                         ),
                                         spacing="2"
                                     )
