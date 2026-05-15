@@ -200,7 +200,7 @@ class State(rx.State):
     numero_identificacion: str = ""
     nombres: str = ""
     apellidos: str = ""
-    genero: str = ""
+    sexo: str = ""
     direccion: str = ""
     telefono: str = ""
     departamento: str = ""
@@ -274,6 +274,25 @@ class State(rx.State):
     solicitud_consultada: dict[str, Any] = {}
     consulta_mensaje: str = ""
 
+
+    @rx.var
+    def data_grafica_tipo(self) -> list[dict]:
+        counts = self.estadisticas_por_tipo
+        return [
+            {"name": "Petición", "cantidad": counts.get("Petición", 0)},
+            {"name": "Queja", "cantidad": counts.get("Queja", 0)},
+            {"name": "Reclamo", "cantidad": counts.get("Reclamo", 0)},
+            {"name": "Sugerencia", "cantidad": counts.get("Sugerencia", 0)},
+        ]
+    
+    @rx.var
+    def data_grafica_estado(self) -> list[dict]:
+        return [
+            {"name": "Radicada", "cantidad": int(self.numero_solicitudes_radicadas)},
+            {"name": "Actualizada", "cantidad": int(self.numero_solicitudes_actualizadas)},
+            {"name": "Cerrada", "cantidad": int(self.numero_solicitudes_cerradas)},
+        ]
+
     def mostrar_toast(self, mensaje: str, tipo: str = "success"):
         self.toast_mensaje = mensaje
         self.toast_tipo = tipo
@@ -282,8 +301,8 @@ class State(rx.State):
     def ocultar_toast(self):
         self.toast_visible = False
         self.toast_mensaje = ""
+        
      
-
     @rx.var
     def numero_solicitudes(self) -> str:
         return str(len(self.solicitudes or []))
@@ -900,7 +919,7 @@ Sistema PQRS
                 numero_identificacion=self.numero_identificacion,
                 nombres=self.nombres,
                 apellidos=self.apellidos,
-                genero=self.genero,
+                sexo=self.sexo,
                 direccion=self.direccion,
                 telefono=self.telefono,
                 departamento=self.departamento,
@@ -1406,12 +1425,12 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                         ),
                     ),
                     rx.vstack(
-                        rx.text("Género", color=text_color),
+                        rx.text("Sexo", color=text_color),
                         rx.select(
-                            ["Femenino", "Masculino", "Otro", "Prefiero no decirlo"],
+                            ["Femenino", "Masculino"],
                             placeholder="Selecciona",
-                            value=State.genero,
-                            on_change=State.set_genero,
+                            value=State.sexo,
+                            on_change=State.set_sexo,
                             border_radius="md",
                             **input_style,
                         ),
@@ -2920,7 +2939,7 @@ def solicitudes_page() -> rx.Component:
 
                                 # Archivo adjunto: zona arrastrar y soltar moderna
                                 rx.vstack(
-                                    rx.text("Documento adjunto (si quieres enviar mas de 2 archivos puedes poner los en un Zip)", font_weight="semibold"),
+                                    rx.text("Documento adjunto (si quieres enviar mas de 2 archivos puedes ponerlos en un Zip)", font_weight="semibold"),
                                     rx.box(
                                         rx.hstack(
                                             rx.image(src="/clip-icon.svg", alt="Adjuntar", height="20px"),
