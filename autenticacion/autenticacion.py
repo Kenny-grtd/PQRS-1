@@ -943,6 +943,8 @@ Sistema PQRS
         self.borrar_mensajes_de_estado()
         if not self.validacion_de_entradas(require_strong_pw=False):
             self.succes2 = ""
+            self.error_de_contraseña = self.error_de_registro or "Correo o contraseña incorrectos."
+            self.error_de_registro = ""
             return
         with rx.session() as session:
             user = session.exec(select(Usuario).where(Usuario.email == self.correo)).first()
@@ -1406,7 +1408,7 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                         ),
                     ),
                     rx.vstack(
-                        rx.text("Género", color=text_color),
+                        rx.text("Sexo", color=text_color),
                         rx.select(
                             ["Femenino", "Masculino", "Otro", "Prefiero no decirlo"],
                             placeholder="Selecciona",
@@ -1435,36 +1437,78 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                     ),
                     rx.vstack(
                         rx.text("Departamento", color=text_color),
-                        rx.hstack(
-                            rx.input(
-                                placeholder="Departamento",
-                                value=State.departamento,
-                                on_change=State.set_and_validate_departamento,
-                                border_radius="md",
-                                **input_style,
-                            ),
-                            rx.cond(
-                                State.departamento_valid,
-                                rx.image(src="/check-green.svg", height="16px", ml="2"),
-                                rx.box(),
-                            ),
+                        rx.select(
+                            [
+                                "Antioquia",
+                                "Valle del Cauca",
+                                "Cundinamarca",
+                                "Bogotá D.C.",
+                                "Atlántico",
+                                "Santander",
+                                "Bolívar",
+                                "Risaralda",
+                                "Quindío",
+                                "Caldas",
+                                "Norte de Santander",
+                                "Magdalena",
+                                "Tolima",
+                                "Córdoba",
+                                "Boyacá",
+                                "Meta",
+                                "Huila",
+                                "Cauca",
+                                "Nariño",
+                                "Putumayo",
+                                "Chocó",
+                                "Casanare",
+                                "Arauca",
+                                "Guaviare",
+                                "Guainía",
+                                "Vaupés",
+                                "Vichada",
+                                "La Guajira",
+                                "San Andrés y Providencia",
+                            ],
+                            placeholder="Selecciona",
+                            value=State.departamento,
+                            on_change=State.set_and_validate_departamento,
+                            border_radius="md",
+                            **input_style,
                         ),
                     ),
                     rx.vstack(
                         rx.text("Ciudad", color=text_color),
-                        rx.hstack(
-                            rx.input(
-                                placeholder="Ciudad",
-                                value=State.ciudad,
-                                on_change=State.set_and_validate_ciudad,
-                                border_radius="md",
-                                **input_style,
-                            ),
-                            rx.cond(
-                                State.ciudad_valid,
-                                rx.image(src="/check-green.svg", height="16px", ml="2"),
-                                rx.box(),
-                            ),
+                        rx.select(
+                            [
+                                "Bogotá",
+                                "Medellín",
+                                "Cali",
+                                "Barranquilla",
+                                "Cartagena",
+                                "Bucaramanga",
+                                "Pereira",
+                                "Manizales",
+                                "Armenia",
+                                "Neiva",
+                                "Ibagué",
+                                "Cúcuta",
+                                "Pasto",
+                                "Montería",
+                                "Sincelejo",
+                                "Valledupar",
+                                "Tunja",
+                                "Riohacha",
+                                "Yopal",
+                                "Florencia",
+                                "Mocoa",
+                                "Leticia",
+                                "San Andrés",
+                            ],
+                            placeholder="Selecciona",
+                            value=State.ciudad,
+                            on_change=State.set_and_validate_ciudad,
+                            border_radius="md",
+                            **input_style,
                         ),
                     ),
                     rx.box(
@@ -2594,7 +2638,7 @@ def funcionario_dashboard() -> rx.Component:
                                     spacing="4"
                                 ),
                                 rx.text("No hay solicitudes que coincidan con los filtros.", color="gray.600", font_size="md", text_align="center", padding="4em")
-                            ),
+                            
                             spacing="4"
                         ),
                         width="100%"
