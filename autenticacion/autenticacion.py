@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import quote
 import reflex as rx
 from .usuario_model import Usuario, Solicitud
-from sqlmodel import select, SQLModel, create_engine, text
+from sqlmodel import select, SQLModel, create_engine, text, Session
 from rxconfig import config
 import smtplib
 from email.mime.text import MIMEText
@@ -191,7 +191,7 @@ class State(rx.State):
     toast_visible: bool = False
 
     "En esta clase se define el estado de la aplicación, es decir, las variables que se van a usar en la aplicación y sus valores iniciales."
-    state_auto_setters = False
+    state_auto_setters = True
     contraseña: str = ""
     confirmar_contraseña: str = ""
     correo: str = ""
@@ -629,7 +629,7 @@ class State(rx.State):
                 # Continuamos sin guardar el documento
         
         try:
-            with rx.session() as session:
+            with Session(engine) as session:
                 solicitud_obj = session.get(Solicitud, self.editar_estado_id)
                 if not solicitud_obj:
                     self.mensaje_actualizar_estado = "Solicitud no encontrada."
@@ -746,7 +746,7 @@ Sistema PQRS
             return
         
         try:
-            with rx.session() as session:
+            with Session(engine) as session:
                 solicitud_obj = session.get(Solicitud, self.asignar_area_id)
                 if not solicitud_obj:
                     self.mensaje_asignacion = "Solicitud no encontrada."
@@ -879,7 +879,7 @@ Sistema PQRS
 
     def cargar_solicitudes(self):
         try:
-            with rx.session() as session:
+            with Session(engine) as session:
                 query = select(Solicitud).order_by(Solicitud.id)
                 if self.rol_usuario == "ciudadano" and self.email_actual:
                     query = query.where(Solicitud.creado_por == self.email_actual)
@@ -903,7 +903,7 @@ Sistema PQRS
         return True
 
     def _crear_usuario(self, rol: str, exito_mensaje: str) -> bool:
-        with rx.session() as session:
+        with Session(engine) as session:
             existing_user = session.exec(select(Usuario).where(Usuario.email == self.correo)).first()
             if existing_user:
                 self.error_de_registro = "El correo ya está registrado."
@@ -965,7 +965,7 @@ Sistema PQRS
             self.error_de_contraseña = self.error_de_registro or "Correo o contraseña incorrectos."
             self.error_de_registro = ""
             return
-        with rx.session() as session:
+        with Session(engine) as session:
             user = session.exec(select(Usuario).where(Usuario.email == self.correo)).first()
             print(f"Login lookup for: {self.correo} -> {'FOUND' if user else 'NOT FOUND'}")
             if user:
@@ -1035,7 +1035,7 @@ Sistema PQRS
         if not cantida_minima_contraseña(self.new_password):
             self.change_pw_message = "La nueva contraseña no cumple los requisitos de seguridad."
             return
-        with rx.session() as session:
+        with Session(engine) as session:
             user = session.exec(select(Usuario).where(Usuario.id == self.id_usuario)).first()
             if not user:
                 self.change_pw_message = "Usuario no encontrado."
@@ -1159,7 +1159,7 @@ Sistema PQRS
 
         if self.editar_solicitud_id:
             try:
-                with rx.session() as session:
+                with Session(engine) as session:
                     solicitud_obj = session.get(Solicitud, self.editar_solicitud_id)
                     if not solicitud_obj:
                         self.solicitud_mensaje = "Solicitud no encontrada para editar."
@@ -1186,7 +1186,7 @@ Sistema PQRS
                 return
 
         try:
-            with rx.session() as session:
+            with Session(engine) as session:
                 solicitud_obj = Solicitud(
                     radicado=f"PQRS-{datetime.now().year}-{uuid.uuid4().hex[:8]}",
                     tipo_solicitud=self.tipo_solicitud,
@@ -1212,7 +1212,7 @@ Sistema PQRS
 
     def editar_solicitud(self, solicitud_id: int):
         try:
-            with rx.session() as session:
+            with Session(engine) as session:
                 solicitud_obj = session.get(Solicitud, solicitud_id)
                 if solicitud_obj:
                     self.editar_solicitud_id = solicitud_id
@@ -1240,7 +1240,7 @@ Sistema PQRS
             return
         
         try:
-            with rx.session() as session:
+            with Session(engine) as session:
                 solicitud = session.exec(
                     select(Solicitud).where(Solicitud.radicado == self.consulta_radicado)
                 ).first()
@@ -1270,6 +1270,9 @@ Sistema PQRS
 
     def set_genero(self, value: str):
         self.genero = value
+
+    def set_sexo(self, value: str):
+        self.sexo = value
 
     def set_direccion(self, value: str):
         self.direccion = value
@@ -2657,7 +2660,7 @@ def funcionario_dashboard() -> rx.Component:
                                     spacing="4"
                                 ),
                                 rx.text("No hay solicitudes que coincidan con los filtros.", color="gray.600", font_size="md", text_align="center", padding="4em")
-                            
+                            ),
                             spacing="4"
                         ),
                         width="100%"
@@ -3373,3 +3376,4 @@ if app._api is not None:
         StaticFiles(directory=str(UPLOAD_DIR), check_dir=False),
         name="uploads",
     )
+
