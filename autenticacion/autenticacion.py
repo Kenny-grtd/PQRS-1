@@ -205,6 +205,8 @@ class State(rx.State):
     telefono: str = ""
     departamento: str = ""
     ciudad: str = ""
+    etnia: str = ""
+    persona_vulnerable_registro: str = ""
     # Estados de validación UX
     correo_validado: bool = False
     numero_identificacion_valid: bool = False
@@ -254,6 +256,10 @@ class State(rx.State):
     new_password: str = ""
     confirm_new_password: str = ""
     change_pw_message: str = ""
+    # Campos para cambiar rol de ciudadano a funcionario
+    cambiar_rol_email: str = ""
+    cambiar_rol_mensaje: str = ""
+    usuarios_registrados: list[dict[str, Any]] = []
     # Campos para editar estado de solicitud
     editar_estado_id: int = 0
     nuevo_estado: str = ""
@@ -261,6 +267,11 @@ class State(rx.State):
     mensaje_actualizar_estado: str = ""
     respuesta_documento: str = ""
     respuesta_documento_nombre: str = ""
+    # Variables para modal de política y validaciones
+    modal_politica_visible: bool = False
+    archivo_error_mensaje: str = ""
+    correo_confirmacion_visible: bool = False
+    correo_confirmacion_mensaje: str = ""
     
     # Campos para asignación de área con mensaje
     asignar_area_id: int = 0
@@ -361,6 +372,34 @@ class State(rx.State):
     def documento_nombres_count(self) -> str:
         return str(len(self.documento_nombres or []))
     
+    @rx.var
+    def usuarios_registrados_count(self) -> int:
+        return len(self.usuarios_registrados or [])
+    
+    @rx.var
+    def solicitud_consultada_adjuntos(self) -> list[dict]:
+        documento_str = self.solicitud_consultada.get("documento", "")
+        documento_basename_str = self.solicitud_consultada.get("documento_basename", "")
+        
+        if not documento_str:
+            return []
+        
+        try:
+            documentos = json.loads(documento_str)
+            basenames = json.loads(documento_basename_str) if documento_basename_str else []
+            
+            result = []
+            for i, doc in enumerate(documentos or []):
+                basename = basenames[i] if i < len(basenames) else f"Documento {i+1}"
+                result.append({
+                    "basename": basename,
+                    "href": f"/assets/uploads/{doc.split('/')[-1]}"
+                })
+            return result
+        except:
+            return []
+    
+    
     
     def set_query_solicitud(self, value: str):
         self.query_solicitud = value or ""
@@ -387,9 +426,15 @@ class State(rx.State):
         self.succes2 = ""
         
     def validacion_de_entradas(self, require_strong_pw: bool = True) -> bool:
+        self.correo_confirmacion_visible = False
+        self.correo_confirmacion_mensaje = ""
         if not validar_correo(self.correo):
             self.error_de_registro = "Correo no válido."
+            self.correo_confirmacion_visible = True
+            self.correo_confirmacion_mensaje = "Correo no válido."
             return False
+        self.correo_confirmacion_visible = True
+        self.correo_confirmacion_mensaje = "Correo válido."
         if require_strong_pw and not cantida_minima_contraseña(self.contraseña):
             self.error_de_registro = "La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas, números y caracteres especiales."
             return False
@@ -459,6 +504,35 @@ class State(rx.State):
         self.ciudad = val
         self.validar_campo_simple("ciudad")
 
+    def set_etnia(self, val: str):
+        self.etnia = val or ""
+
+    def set_persona_vulnerable_registro(self, val: str):
+        self.persona_vulnerable_registro = val or ""
+
+    def set_etnia(self, val: str):
+        self.etnia = val or ""
+
+    def set_modal_politica_visible(self, visible: bool):
+        self.modal_politica_visible = bool(visible)
+
+    def set_archivo_error_mensaje(self, mensaje: str):
+        self.archivo_error_mensaje = mensaje or ""
+
+    def set_correo_confirmacion_visible(self, visible: bool):
+        self.correo_confirmacion_visible = bool(visible)
+
+    def set_correo_confirmacion_mensaje(self, mensaje: str):
+        self.correo_confirmacion_mensaje = mensaje or ""
+
+    def validar_email(self):
+        if validar_correo(self.correo):
+            self.correo_confirmacion_visible = True
+            self.correo_confirmacion_mensaje = "Correo válido."
+        else:
+            self.correo_confirmacion_visible = True
+            self.correo_confirmacion_mensaje = "Correo no válido."
+
     def set_descripcion(self, val: str):
         # Guardar descripción y longitud para el contador de caracteres
         self.descripcion = val if val is not None else ""
@@ -482,8 +556,19 @@ class State(rx.State):
     def set_acepta_politica_solicitud(self, checked: bool):
         self.acepta_politica_solicitud = bool(checked)
 
-    def set_acepta_politica_datos(self, checked: bool):
-        self.acepta_politica_datos = bool(checked)
+    def preconfirmar_politica(self, checked: bool):
+        if checked:
+            self.modal_politica_visible = True
+        else:
+            self.acepta_politica_datos = False
+
+    def confirmar_politica(self):
+        self.acepta_politica_datos = True
+        self.modal_politica_visible = False
+
+    def cancelar_politica(self):
+        self.acepta_politica_datos = False
+        self.modal_politica_visible = False
 
     def set_acepta_notificaciones(self, checked: bool):
         self.acepta_notificaciones = bool(checked)
@@ -494,8 +579,32 @@ class State(rx.State):
         self.documento_nombres = []
         self.documento = ""
         self.documento_nombre = ""
+        self.archivo_error_mensaje = ""
 
-        def add_document(item: Any):
+        allowed_ext = {"pdf", "png", "jpg", "jpeg"}
+        max_files = 3
+        max_size = 10 * 1024 * 1024
+
+        def valid_document(item: Any) -> bool:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("filename") or "adjunto"
+                size = item.get("size") or 0
+            elif isinstance(item, str):
+                name = os.path.basename(item)
+                size = 0
+            else:
+                return True
+
+            ext = os.path.splitext(name)[1].lower().lstrip(".")
+            if ext not in allowed_ext:
+                self.archivo_error_mensaje = "Solo se aceptan archivos PDF, PNG o JPG."
+                return False
+            if size and size > max_size:
+                self.archivo_error_mensaje = "Cada archivo no puede superar los 10MB."
+                return False
+            return True
+
+        def append_document(item: Any):
             if isinstance(item, dict):
                 name = item.get("name") or item.get("filename") or "adjunto"
                 self.documento_nombres.append(name)
@@ -506,11 +615,17 @@ class State(rx.State):
             else:
                 self.documentos.append(item)
 
-        if isinstance(documento, list):
-            for item in documento:
-                add_document(item)
-        else:
-            add_document(documento)
+        archivos = documento if isinstance(documento, list) else [documento]
+        if len(archivos) > max_files:
+            self.archivo_error_mensaje = "Solo puedes adjuntar hasta 3 archivos."
+            return
+
+        for item in archivos:
+            if not valid_document(item):
+                self.documentos = []
+                self.documento_nombres = []
+                return
+            append_document(item)
 
         if self.documento_nombres:
             self.documento_nombre = ", ".join(self.documento_nombres)
@@ -880,7 +995,8 @@ Sistema PQRS
     def cargar_solicitudes(self):
         try:
             with rx.session() as session:
-                query = select(Solicitud).order_by(Solicitud.id)
+                # Ordenar por fecha descendente para mostrar las más nuevas primero
+                query = select(Solicitud).order_by(Solicitud.fecha.desc())
                 if self.rol_usuario == "ciudadano" and self.email_actual:
                     query = query.where(Solicitud.creado_por == self.email_actual)
                 solicitudes_obj = session.exec(query).all()
@@ -889,25 +1005,25 @@ Sistema PQRS
             print(f"Error cargando solicitudes: {e}")
             self.solicitudes = []
 
-    def _validar_registro_basico(self) -> bool:
+    def _validar_registro_basico(self) -> None:
+        self.error_de_registro = ""
         if not self.validacion_de_entradas():
-            return False
+            return
         required_fields = ["nombres", "apellidos", "tipo_identificacion", "numero_identificacion"]
         for f in required_fields:
             if not getattr(self, f, ""):
                 self.error_de_registro = "Completa los campos obligatorios de información personal."
-                return False
+                return
         if not self.acepta_politica_datos or not self.acepta_notificaciones:
             self.error_de_registro = "Debes aceptar la política de datos y recibir notificaciones para registrarte."
-            return False
-        return True
+            return
 
-    def _crear_usuario(self, rol: str, exito_mensaje: str) -> bool:
+    def _crear_usuario(self, rol: str, exito_mensaje: str):
         with rx.session() as session:
             existing_user = session.exec(select(Usuario).where(Usuario.email == self.correo)).first()
             if existing_user:
                 self.error_de_registro = "El correo ya está registrado."
-                return False
+                return
             hashed = tiene_password(self.contraseña)
             nuevo_usuario = Usuario(
                 email=self.correo,
@@ -924,6 +1040,8 @@ Sistema PQRS
                 telefono=self.telefono,
                 departamento=self.departamento,
                 ciudad=self.ciudad,
+                etnia=self.etnia,
+                persona_vulnerable=self.persona_vulnerable_registro,
             )
             session.add(nuevo_usuario)
             session.commit()
@@ -935,25 +1053,34 @@ Sistema PQRS
         self.contraseña = ""
         self.confirmar_contraseña = ""
         self.show_password = False
-        return True
+        # Login automático después del registro
+        self.es_autentica = True
+        self.correo_usuario = self.correo
+        self.rol_usuario = "ciudadano"
+        self.cargar_usuarios()
 
     def signup(self):
         self.borrar_mensajes_de_estado()
-        if not self._validar_registro_basico():
+        self._validar_registro_basico()
+        if self.error_de_registro:
             return
         self._crear_usuario(
             rol="ciudadano",
             exito_mensaje="Registro exitoso. Revisa tu correo para confirmar. Ahora el funcionario puede iniciar sesión.",
         )
+        # Redirigir a solicitudes después del registro
+        if not self.error_de_registro:
+            return rx.redirect("/solicitudes")
 
     def signup_funcionario(self):
         self.borrar_mensajes_de_estado()
         if not self.es_autentica or self.rol_usuario != "funcionario":
             self.error_de_registro = "Solo los funcionarios autenticados pueden registrar nuevos funcionarios."
             return
-        if not self._validar_registro_basico():
+        self._validar_registro_basico()
+        if self.error_de_registro:
             return
-        self._crear_usuario(
+        return self._crear_usuario(
             rol="funcionario",
             exito_mensaje="Funcionario registrado con éxito. Ahora puede iniciar sesión con su correo institucional.",
         )
@@ -989,6 +1116,7 @@ Sistema PQRS
             self.email_actual = user.email
             self.es_autentica = True
             self.cargar_solicitudes()
+            self.cargar_usuarios()
             self.error_de_contraseña = ""
             self.contraseña = ""
             self.confirmar_contraseña = ""
@@ -1164,8 +1292,12 @@ Sistema PQRS
                     if not solicitud_obj:
                         self.solicitud_mensaje = "Solicitud no encontrada para editar."
                         return
+                    # Obtener persona_vulnerable del usuario autenticado
+                    usuario = session.get(Usuario, self.id_usuario)
+                    persona_vulnerable_valor = usuario.persona_vulnerable if usuario else None
+                    
                     solicitud_obj.tipo_solicitud = self.tipo_solicitud
-                    solicitud_obj.persona_vulnerable = self.persona_vulnerable or None
+                    solicitud_obj.persona_vulnerable = persona_vulnerable_valor or None
                     solicitud_obj.asunto = self.asunto
                     solicitud_obj.descripcion = self.descripcion
                     solicitud_obj.ubicacion = self.ubicacion or None
@@ -1187,10 +1319,14 @@ Sistema PQRS
 
         try:
             with rx.session() as session:
+                # Obtener persona_vulnerable del usuario autenticado
+                usuario = session.get(Usuario, self.id_usuario)
+                persona_vulnerable_valor = usuario.persona_vulnerable if usuario else None
+                
                 solicitud_obj = Solicitud(
-                    radicado=f"PQRS-{datetime.now().year}-{uuid.uuid4().hex[:8]}",
+                    radicado=f"PQRS-{datetime.now().year}-{uuid.uuid4().hex[:8]}".upper(),
                     tipo_solicitud=self.tipo_solicitud,
-                    persona_vulnerable=self.persona_vulnerable or None,
+                    persona_vulnerable=persona_vulnerable_valor or None,
                     asunto=self.asunto,
                     descripcion=self.descripcion,
                     ubicacion=self.ubicacion or None,
@@ -1204,7 +1340,8 @@ Sistema PQRS
                 )
                 session.add(solicitud_obj)
                 session.commit()
-            self.solicitud_mensaje = "Solicitud registrada correctamente."
+                radicado_generado = solicitud_obj.radicado
+            self.solicitud_mensaje = f"✅ Solicitud enviada con éxito. Radicado: {radicado_generado}"
             self.limpiar_formulario_solicitud(keep_message=True)
             self.cargar_solicitudes()
         except Exception as e:
@@ -1254,6 +1391,87 @@ Sistema PQRS
                 
         except Exception as e:
             self.consulta_mensaje = f"Error consultando solicitud: {e}"
+
+    def cargar_usuarios(self):
+        """Carga la lista de usuarios registrados en el sistema."""
+        try:
+            with rx.session() as session:
+                usuarios = session.exec(select(Usuario)).all()
+                self.usuarios_registrados = [
+                    {
+                        "id": u.id,
+                        "email": u.email,
+                        "nombres": u.nombres or "",
+                        "apellidos": u.apellidos or "",
+                        "rol": u.rol,
+                        "fecha_creacion": u.Fecha_de_creacion.strftime("%Y-%m-%d") if isinstance(u.Fecha_de_creacion, datetime) else str(u.Fecha_de_creacion),
+                        "is_active": "Activo" if u.is_active else "Inactivo",
+                    }
+                    for u in usuarios
+                ]
+        except Exception as e:
+            print(f"Error cargando usuarios: {e}")
+            self.usuarios_registrados = []
+
+    def cambiar_rol_ciudadano_a_funcionario(self):
+        """Cambia el rol de un ciudadano a funcionario."""
+        self.cambiar_rol_mensaje = ""
+        
+        if not self.cambiar_rol_email:
+            self.cambiar_rol_mensaje = "Ingresa el correo del usuario."
+            return
+        
+        try:
+            with rx.session() as session:
+                usuario = session.exec(
+                    select(Usuario).where(Usuario.email == self.cambiar_rol_email)
+                ).first()
+                
+                if not usuario:
+                    self.cambiar_rol_mensaje = f"No se encontró usuario con el correo {self.cambiar_rol_email}."
+                    return
+                
+                if usuario.rol == "funcionario":
+                    self.cambiar_rol_mensaje = f"El usuario ya es funcionario."
+                    return
+                
+                usuario.rol = "funcionario"
+                session.add(usuario)
+                session.commit()
+                
+                # Enviar notificación
+                try:
+                    asunto = "Rol actualizado - Has sido promovido a Funcionario"
+                    cuerpo = f"""
+Estimado usuario,
+
+Te informamos que tu rol en el sistema ha sido actualizado.
+
+Tu nuevo rol: FUNCIONARIO
+
+Con este rol podrás:
+- Gestionar solicitudes PQRS
+- Asignar áreas responsables
+- Actualizar estados de solicitudes
+- Ver reportes del sistema
+
+Accede al Dashboard Funcionario con tu correo y contraseña.
+
+Atentamente,
+Sistema PQRS
+"""
+                    enviar_correo_notificacion(self.cambiar_rol_email, asunto, cuerpo)
+                except:
+                    pass  # No fallar si no se envía el correo
+                
+                self.cambiar_rol_mensaje = f"✅ Rol del usuario {self.cambiar_rol_email} actualizado a funcionario."
+                self.cambiar_rol_email = ""
+                self.cargar_usuarios()
+        except Exception as e:
+            self.cambiar_rol_mensaje = f"Error al cambiar rol: {e}"
+
+    def set_cambiar_rol_email(self, value: str):
+        self.cambiar_rol_email = value
 
 
     def set_confirmar_contraseña(self, value: str):
@@ -1309,6 +1527,7 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                 value=State.confirmar_contraseña,
                 on_change=State.set_confirmar_contraseña,
                 border_radius="md",
+                min_height="40px",
                 **input_style,
             ),
         )
@@ -1319,7 +1538,7 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
     return rx.card(
         rx.form(
             rx.vstack(
-                rx.heading(title, size="7", color=text_color, margin_bottom="1em"),
+                rx.heading(title, size={"base": "5", "md": "7"}, color=text_color, margin_bottom="1em"),
                 rx.grid(
                     rx.vstack(
                         label_requerido("Correo electrónico"),
@@ -1331,6 +1550,8 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                                 on_change=State.set_correo,
                                 on_blur=State.validar_correo_accion,
                                 border_radius="md",
+                                min_height="60px",
+                                width="100%",
                                 **input_style,
                             ),
                             rx.cond(
@@ -1339,6 +1560,16 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                                 rx.box(),
                             ),
                             width="100%",
+                        ),
+                        rx.cond(
+                            State.correo_confirmacion_visible,
+                            rx.text(
+                                State.correo_confirmacion_mensaje,
+                                color=rx.cond(State.correo_validado, "green.500", "red.500"),
+                                font_size="sm",
+                                mt="2",
+                            ),
+                            rx.box(),
                         ),
                     ),
                     rx.vstack(
@@ -1350,7 +1581,8 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                                 value=State.contraseña,
                                 on_change=State.set_contraseña,
                                 border_radius="md",
-                                width="100%",
+                                width="75%",
+                                min_height="40px",
                                 **input_style,
                             ),
                             rx.button(
@@ -1359,9 +1591,10 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                                 variant="ghost",
                                 size="2",
                             ),
-                            width="100%",
+                            width="90%",
                             spacing="2",
                         ),
+                        col_span="2",
                     ),
                     confirmar_field,
                     rx.vstack(
@@ -1458,35 +1691,38 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                         rx.text("Departamento", color=text_color),
                         rx.select(
                             [
+                                "Amazonas",
                                 "Antioquia",
-                                "Valle del Cauca",
-                                "Cundinamarca",
-                                "Bogotá D.C.",
-                                "Atlántico",
-                                "Santander",
-                                "Bolívar",
-                                "Risaralda",
-                                "Quindío",
-                                "Caldas",
-                                "Norte de Santander",
-                                "Magdalena",
-                                "Tolima",
-                                "Córdoba",
-                                "Boyacá",
-                                "Meta",
-                                "Huila",
-                                "Cauca",
-                                "Nariño",
-                                "Putumayo",
-                                "Chocó",
-                                "Casanare",
                                 "Arauca",
-                                "Guaviare",
+                                "Atlántico",
+                                "Bolívar",
+                                "Boyacá",
+                                "Caldas",
+                                "Caquetá",
+                                "Casanare",
+                                "Cauca",
+                                "Cesar",
+                                "Chocó",
+                                "Córdoba",
+                                "Cundinamarca",
                                 "Guainía",
+                                "Guaviare",
+                                "Huila",
+                                "La Guajira",
+                                "Magdalena",
+                                "Meta",
+                                "Nariño",
+                                "Norte de Santander",
+                                "Putumayo",
+                                "Quindío",
+                                "Risaralda",
+                                "Santander",
+                                "Sucre",
+                                "Tolima",
+                                "Valle del Cauca",
                                 "Vaupés",
                                 "Vichada",
-                                "La Guajira",
-                                "San Andrés y Providencia",
+                                "Bogotá D.C.",
                             ],
                             placeholder="Selecciona",
                             value=State.departamento,
@@ -1522,6 +1758,49 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                                 "Mocoa",
                                 "Leticia",
                                 "San Andrés",
+                                "Quibdó",
+                                "Inírida",
+                                "Mitú",
+                                "Puerto Carreño",
+                                "Santa Marta",
+                                "Villavicencio",
+                                "Popayán",
+                                "Palmira",
+                                "Yumbo",
+                                "Cartago",
+                                "Dosquebradas",
+                                "Itagüí",
+                                "Envigado",
+                                "Sabaneta",
+                                "La Ceja",
+                                "Rionegro",
+                                "Copacabana",
+                                "Girardota",
+                                "Barbosa",
+                                "Belmira",
+                                "Chipaque",
+                                "Sibaté",
+                                "Soacha",
+                                "Sopó",
+                                "Tausa",
+                                "Tenjo",
+                                "Tena",
+                                "Tocaima",
+                                "Tocancipá",
+                                "Zipaquirá",
+                                "Chía",
+                                "Fúquene",
+                                "Pacho",
+                                "Útica",
+                                "Villapinzón",
+                                "Villeta",
+                                "Guatapé",
+                                "Guachené",
+                                "Corinto",
+                                "La Plata",
+                                "Calarcá",
+                                "Filandia",
+                                "Apía",
                             ],
                             placeholder="Selecciona",
                             value=State.ciudad,
@@ -1543,7 +1822,51 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                         ),
                         grid_column="1 / -1",
                     ),
-                    template_columns="repeat(3, 1fr)",
+                    template_columns={"base": "1fr", "md": "repeat(3, 1fr)"},
+                    gap="4",
+                    width="100%",
+                ),
+                rx.grid(
+                    rx.vstack(
+                        rx.text("Etnia", color=text_color),
+                        rx.select(
+                            [
+                                "Ninguna",
+                                "Indígena",
+                                "Afrocolombiano",
+                                "Raizal",
+                                "Palenquero",
+                                "Gitano/a",
+                                "Otro",
+                            ],
+                            placeholder="Selecciona",
+                            value=State.etnia,
+                            on_change=State.set_etnia,
+                            border_radius="md",
+                            **input_style,
+                        ),
+                    ),
+                    rx.vstack(
+                        rx.text("Características del ciudadano", color=text_color),
+                        rx.select(
+                            [
+                                "Ninguna",
+                                "Habitante de la calle",
+                                "No brinda información",
+                                "Peligro Inminente",
+                                "Periodistas en ejercicio de su actividad",
+                                "Primera Infancia",
+                                "Veteranos Fuerza Pública",
+                                "Víctimas - Conflicto Armado",
+                            ],
+                            placeholder="Selecciona una característica",
+                            value=State.persona_vulnerable_registro,
+                            on_change=State.set_persona_vulnerable_registro,
+                            border_radius="md",
+                            **input_style,
+                        ),
+                    ),
+                    template_columns={"base": "1fr", "md": "repeat(2, 1fr)"},
                     gap="4",
                     width="100%",
                 ),
@@ -1555,19 +1878,58 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                         color=text_color,
                     ),
                     rx.checkbox(
-                        rx.link(
-                            "He leído y acepto la Política de Protección de Datos",
-                            href="/politica-privacidad",
-                            color="blue.500",
+                        rx.hstack(
+                            rx.link(
+                                "He leído y acepto la Política de Protección de Datos",
+                                href="/politica-privacidad",
+                                color="blue.500",
+                            ),
+                            rx.text("(Al aceptarla se mostrará un aviso)", color=rx.color_mode_cond(light="gray.500", dark="gray.400"), font_size="xs")
                         ),
                         is_checked=State.acepta_politica_datos,
-                        on_change=State.set_acepta_politica_datos,
+                        on_change=State.preconfirmar_politica,
                         color=text_color,
                     ),
                     spacing="3",
                     padding_top="4",
                     align_items="start",
                     width="100%",
+                ),
+                rx.cond(
+                    State.modal_politica_visible,
+                    rx.box(
+                        rx.box(
+                            rx.heading("Confirmación de Política de Privacidad", size="4", color="black"),
+                            rx.text(
+                                "Al aceptar la Política de Protección de Datos, confirmas que has leído y comprendido el uso de tus datos personales.",
+                                color="gray.700",
+                                font_size="sm"
+                            ),
+                            rx.text(
+                                "La aceptación es necesaria para continuar con el registro.",
+                                color="gray.600",
+                                font_size="sm"
+                            ),
+                            rx.hstack(
+                                rx.button("Aceptar", on_click=State.confirmar_politica, color_scheme="blue"),
+                                rx.button("Cancelar", on_click=State.cancelar_politica, variant="outline"),
+                                spacing="3"
+                            ),
+                            spacing="4",
+                            p="6",
+                            bg="white",
+                            border_radius="2xl",
+                            width="100%",
+                            max_width="520px"
+                        ),
+                        position="fixed",
+                        inset="0",
+                        bg="rgba(0,0,0,0.45)",
+                        align_items="center",
+                        justify="center",
+                        z_index="1000",
+                        p="6"
+                    )
                 ),
                 rx.cond(
                     State.error_de_registro != "",
@@ -1580,15 +1942,16 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                     rx.box(),
                 ),
                 rx.hstack(
-                    rx.button(title, type="submit", color_scheme="blue", size="4", width="220px"),
+                    rx.button(title, type="submit", color_scheme="blue", size="4", width={"base": "100%", "md": "220px"}),
                     rx.link(
                         "¿Ya tienes una cuenta? Inicia sesión",
                         href="/login",
-                        margin_left="4",
+                        margin_left={"base": "0", "md": "4"},
                         color="blue.500",
+                        width={"base": "100%", "md": "auto"},
                     ),
                     spacing="4",
-                    justify="start",
+                    justify={"base": "center", "md": "start"},
                     width="100%",
                 ),
                 spacing="4",
@@ -1597,8 +1960,8 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
             ),
             on_submit=on_submit,
         ),
-        p="8",
-        max_width="1100px",
+        p={"base": "4", "md": "8"},
+        max_width={"base": "95%", "md": "1100px"},
         box_shadow="2xl",
         border_radius="2xl",
         bg=rx.color_mode_cond(light="white", dark="#1a202c"),
@@ -1621,6 +1984,16 @@ def navbar() -> rx.Component:
                 rx.cond(
                     State.es_autentica & (State.rol_usuario == "funcionario"),
                     rx.link("Registrar Funcionario", href="/registro-funcionario", color="white", font_weight="bold", _hover={"opacity": 0.8}),
+                    rx.text("", display="none")
+                ),
+                rx.cond(
+                    State.es_autentica & (State.rol_usuario == "funcionario"),
+                    rx.link("Ver Usuarios", href="/usuarios", color="white", font_weight="bold", _hover={"opacity": 0.8}),
+                    rx.text("", display="none")
+                ),
+                rx.cond(
+                    State.es_autentica & (State.rol_usuario == "funcionario"),
+                    rx.link("Cambiar Rol", href="/cambiar-rol", color="white", font_weight="bold", _hover={"opacity": 0.8}),
                     rx.text("", display="none")
                 ),
                 rx.cond(
@@ -2116,15 +2489,16 @@ def change_password_page() -> rx.Component:
         rx.center(
             rx.card(
                 rx.vstack(
-                    rx.heading("Cambiar Contraseña", size="7", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.heading("Cambiar Contraseña", size={"base": "5", "md": "7"}, color=rx.color_mode_cond(light="black", dark="white")),
                     rx.input(placeholder="Contraseña actual", type="password", value=State.current_password, on_change=State.set_current_password, width="100%"),
                     rx.input(placeholder="Nueva contraseña", type="password", value=State.new_password, on_change=State.set_new_password, width="100%"),
                     rx.input(placeholder="Confirmar nueva contraseña", type="password", value=State.confirm_new_password, on_change=State.set_confirm_new_password, width="100%"),
                     rx.button("Cambiar contraseña", on_click=State.change_password, color_scheme="blue", width="100%"),
                     rx.text(State.change_pw_message, color="green.500", font_size="sm")
                 ),
-                p="8",
-                max_width="560px"
+                p={"base": "4", "md": "8"},
+                max_width={"base": "90%", "md": "560px"},
+                width="100%",
             ),
             min_height="84vh"
         ),
@@ -2141,7 +2515,7 @@ def login_page() -> rx.Component:
                 rx.vstack(
                     rx.heading(
                         "Iniciar Sesión",
-                        size="7",
+                        size={"base": "5", "md": "7"},
                         margin_bottom="1em",
                         color=rx.color_mode_cond(light="black", dark="white"),
                     ),
@@ -2170,7 +2544,7 @@ def login_page() -> rx.Component:
                     ),
                     rx.cond(
                         State.error_de_contraseña != "",
-                        rx.text(State.error_de_contraseña, color="red.500", font_size="0.9em"),
+                        rx.text(State.error_de_contraseña, color="red.500", font_size="1em", font_weight="bold", padding="8px", bg="rgba(239, 68, 68, 0.1)", border_radius="md"),
                         rx.box(),
                     ),
                     rx.cond(
@@ -2192,9 +2566,10 @@ def login_page() -> rx.Component:
                         color="#60a5fa",
                     ),
                     spacing="4",
-                    padding="1.5em",
+                    padding={"base": "1em", "md": "1.5em"},
                 ),
-                width="400px",
+                width={"base": "90%", "md": "400px"},
+                max_width="95%",
                 box_shadow="lg",
                 border_radius="15px",
             ),
@@ -2491,6 +2866,34 @@ def funcionario_dashboard() -> rx.Component:
                         width="100%",
                         flex_wrap="wrap"
                     ),
+                    rx.box(
+                        rx.vstack(
+                            rx.text("Usuarios registrados", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                            rx.heading(State.usuarios_registrados_count, size="3", color=rx.color_mode_cond(light="black", dark="white")),
+                            rx.text("Usuarios cargados en el sistema", font_size="sm", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
+                            rx.vstack(
+                                rx.foreach(
+                                    State.usuarios_registrados[:5],
+                                    lambda usuario: rx.hstack(
+                                        rx.text(usuario["email"], font_size="sm", no_wrap=True),
+                                        rx.badge(usuario["rol"], color_scheme=rx.cond(usuario["rol"] == "funcionario", "blue", "gray"), variant="soft"),
+                                        spacing="3",
+                                        width="100%"
+                                    )
+                                ),
+                                rx.cond(
+                                    State.usuarios_registrados_count > 5,
+                                    rx.text("Se muestran los 5 usuarios más recientes.", font_size="xs", color="gray.500")
+                                )
+                            ),
+                            rx.link("Ver todos los usuarios", href="/usuarios", color_scheme="blue", font_weight="bold"),
+                        ),
+                        p="4",
+                        border="1px solid #e2e8f0",
+                        border_radius="xl",
+                        bg=rx.color_mode_cond(light="#f8fafc", dark="#111827"),
+                        width="100%"
+                    ),
                     # Barra de búsqueda y filtros
                     rx.box(
                         rx.vstack(
@@ -2593,11 +2996,7 @@ def funcionario_dashboard() -> rx.Component:
                                                     rx.text(f"Fecha: {solicitud['fecha']}", color="gray.600", font_size="sm"),
                                                     spacing="2"
                                                 ),
-                                                rx.cond(
-                                                    solicitud.get("ubicacion") != None,
-                                                    rx.text(f"Ubicación: {solicitud['ubicacion']}", color="gray.600", font_size="sm"),
-                                                    rx.text("")
-                                                ),
+
                                                 rx.cond(
                                                     solicitud.get("area_responsable") != None,
                                                     rx.text(f"Área: {solicitud['area_responsable']}", color="gray.600", font_size="sm"),
@@ -2657,7 +3056,7 @@ def funcionario_dashboard() -> rx.Component:
                                     spacing="4"
                                 ),
                                 rx.text("No hay solicitudes que coincidan con los filtros.", color="gray.600", font_size="md", text_align="center", padding="4em")
-                            
+                            ),
                             spacing="4"
                         ),
                         width="100%"
@@ -2667,7 +3066,7 @@ def funcionario_dashboard() -> rx.Component:
                         State.editar_estado_id,
                         rx.box(
                             rx.vstack(
-                                rx.heading("Actualizar Estado de Solicitud", size="6", color="black"),
+                                rx.heading("Notificar al usuario", size="6", color="black"),
                                 rx.form(
                                     rx.vstack(
                                         rx.vstack(
@@ -2704,7 +3103,7 @@ def funcionario_dashboard() -> rx.Component:
                                                 ),
                                             )
                                         ),
-                                        rx.vstack(
+                                        rx.vstack( 
                                             rx.text("Documento adjunto (Si quieres adjuntar mas de 2 archivos puedes ponerlos en un ZIP)", font_weight="semibold", color="gray.700"),
                                             rx.box(
                                                 rx.hstack(
@@ -2910,28 +3309,6 @@ def solicitudes_page() -> rx.Component:
                                     label_requerido("Tipo de Solicitud"),
                                     rx.select(["Petición", "Queja", "Reclamo", "Sugerencia"], placeholder="Selecciona el tipo de solicitud", value=State.tipo_solicitud, on_change=State.set_tipo_solicitud, required=True),
                                 ),
-                                rx.vstack(
-                                    label_requerido("Características del ciudadano"),
-                                    rx.select(
-                                        [
-                                            "Ninguna",
-                                            "Habitante de la calle",
-                                            "No brinda información",
-                                            "Peligro Inminente",
-                                            "Periodistas en ejercicio de su actividad",
-                                            "Primera Infancia",
-                                            "Veteranos Fuerza Pública",
-                                            "Víctimas - Conflicto Armado",
-                                        ],
-                                        placeholder="Selecciona una característica",
-                                        value=State.persona_vulnerable,
-                                        on_change=State.set_persona_vulnerable,
-                                        required=False,
-                                        bg="white",
-                                        border="1px solid #cbd5e1",
-                                        border_radius="md",
-                                    ),
-                                ),
 
                                 # Asunto (label + input)
                                 rx.vstack(
@@ -2944,11 +3321,6 @@ def solicitudes_page() -> rx.Component:
                                     label_requerido("Descripción detallada"),
                                     rx.text_area(placeholder="Escribe aquí los detalles de tu solicitud...", value=State.descripcion, on_change=State.set_descripcion, required=True, rows="4", max_length=1000, style={"resize": "vertical", "minHeight": "120px", "border": "1px solid #cbd5e1", "borderRadius": "8px", "padding": "8px"}, _dark={"bg": "gray.700", "color": "white", "borderColor": "gray.600"}),
                                     rx.hstack(rx.spacer(), rx.text(State.descripcion_len, font_size="sm", color="gray.600"), rx.text(" / 1000 caracteres", font_size="sm", color="gray.600")),
-                                ),
-                                rx.input(
-                                    placeholder="Ubicación (opcional)",
-                                    value=State.ubicacion,
-                                    on_change=State.set_ubicacion
                                 ),
 
                                 rx.vstack(
@@ -2994,7 +3366,7 @@ def solicitudes_page() -> rx.Component:
                                                     color="gray.600",
                                                     no_wrap=False,
                                                 ),
-                                                rx.text("Arrastra y suelta tus archivos aquí o haz clic para explorar", color="gray.600"),
+                                                rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB cada uno)", color="gray.600"),
                                             ),
                                             rx.spacer(),
                                             rx.cond(
@@ -3003,7 +3375,7 @@ def solicitudes_page() -> rx.Component:
                                                 rx.text("Ningún archivo seleccionado", font_size="sm", color="gray.500"),
                                             ),
                                         ),
-                                        rx.input(type="file", accept="*/*", multiple=True, on_change=State.set_documento, style={"position": "absolute", "inset": "0", "width": "100%", "height": "100%", "opacity": 0, "cursor": "pointer"}),
+                                        rx.input(type="file", accept="application/pdf,image/png,image/jpeg", multiple=True, on_change=State.set_documento, style={"position": "absolute", "inset": "0", "width": "100%", "height": "100%", "opacity": 0, "cursor": "pointer"}),
                                         position="relative",
                                         padding="4",
                                         border="2px dashed #cfe7ff",
@@ -3011,6 +3383,10 @@ def solicitudes_page() -> rx.Component:
                                         bg="#263ba4",
                                         _dark={"bg": "gray.700", "borderColor": "gray.600"},
                                         width="100%",
+                                    ),
+                                    rx.cond(
+                                        State.archivo_error_mensaje,
+                                        rx.text(State.archivo_error_mensaje, color="red.500", font_size="sm", mt="2"),
                                     )
                                 ),
                                 rx.checkbox(rx.link("He leído y acepto la Política de Tratamiento de Datos Personales", href="/politica-privacidad", color="blue"), is_checked=State.acepta_politica_solicitud, on_change=State.set_acepta_politica_solicitud),
@@ -3354,6 +3730,190 @@ def reportes_page() -> rx.Component:
     )
 
 
+def usuarios_page() -> rx.Component:
+    """Página para que funcionarios vean la lista de usuarios registrados."""
+    return rx.cond(
+        State.es_autentica & (State.rol_usuario == "funcionario"),
+        rx.container(
+            navbar(),
+            rx.center(
+                rx.vstack(
+                    rx.heading("Gestión de Usuarios", size="6", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.text("Lista de usuarios registrados en el sistema", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                    
+                    rx.box(
+                        rx.cond(
+                            State.usuarios_registrados,
+                            rx.vstack(
+                                rx.table.root(
+                                    rx.table.header(
+                                        rx.table.row(
+                                            rx.table.column_header_cell("ID"),
+                                            rx.table.column_header_cell("Email"),
+                                            rx.table.column_header_cell("Nombres"),
+                                            rx.table.column_header_cell("Apellidos"),
+                                            rx.table.column_header_cell("Rol"),
+                                            rx.table.column_header_cell("Fecha de Creación"),
+                                            rx.table.column_header_cell("Estado"),
+                                        ),
+                                    ),
+                                    rx.table.body(
+                                        rx.foreach(
+                                            State.usuarios_registrados,
+                                            lambda usuario: rx.table.row(
+                                                rx.table.cell(rx.text(str(usuario["id"]), font_size="sm")),
+                                                rx.table.cell(rx.text(usuario["email"], font_size="sm")),
+                                                rx.table.cell(rx.text(usuario["nombres"], font_size="sm")),
+                                                rx.table.cell(rx.text(usuario["apellidos"], font_size="sm")),
+                                                rx.table.cell(
+                                                    rx.badge(
+                                                        usuario["rol"],
+                                                        color_scheme=rx.cond(usuario["rol"] == "funcionario", "blue", "gray"),
+                                                        variant="soft",
+                                                    )
+                                                ),
+                                                rx.table.cell(rx.text(usuario["fecha_creacion"], font_size="sm")),
+                                                rx.table.cell(rx.text(usuario["is_active"], font_size="sm")),
+                                            )
+                                        )
+                                    ),
+                                    width="100%",
+                                    size="2",
+                                ),
+                                rx.text(f"Total de usuarios: {State.usuarios_registrados_count}", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                spacing="4",
+                                width="100%"
+                            ),
+                            rx.vstack(
+                                rx.text("No hay usuarios registrados aún.", color="gray.500"),
+                                spacing="4"
+                            )
+                        ),
+                        p="6",
+                        border="1px solid #e2e8f0",
+                        border_radius="lg",
+                        bg=rx.color_mode_cond(light="white", dark="#1a202c"),
+                        width="100%",
+                        overflow_x="auto"
+                    ),
+                    
+                    spacing="4",
+                    align_items="center",
+                    width="100%"
+                ),
+                bg=rx.color_mode_cond(light="white", dark="#1a202c"),
+                max_width="1200px",
+                p="8",
+                box_shadow="2xl",
+                border_radius="2xl",
+                width="100%"
+            ),
+            min_height="84vh"
+        ),
+        rx.container(
+            navbar(),
+            rx.center(
+                rx.vstack(
+                    rx.heading("Acceso Denegado", size="8", color="red.500"),
+                    rx.text("Solo funcionarios autenticados pueden ver esta página."),
+                    rx.link(rx.button("Ir al Login", color_scheme="blue"), href="/login"),
+                    spacing="4",
+                    align_items="center"
+                ),
+                min_height="84vh"
+            )
+        )
+    )
+
+
+def cambiar_rol_page() -> rx.Component:
+    """Página para cambiar el rol de ciudadano a funcionario."""
+    return rx.cond(
+        State.es_autentica & (State.rol_usuario == "funcionario"),
+        rx.container(
+            navbar(),
+            rx.center(
+                rx.vstack(
+                    rx.heading("Cambiar Rol de Usuario", size="6", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.text("Promueve un ciudadano a funcionario", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                    
+                    rx.card(
+                        rx.vstack(
+                            rx.vstack(
+                                rx.text("Correo del usuario a promover", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                rx.input(
+                                    placeholder="usuario@ejemplo.com",
+                                    value=State.cambiar_rol_email,
+                                    on_change=State.set_cambiar_rol_email,
+                                    width="100%",
+                                    type="email",
+                                ),
+                            ),
+                            
+                            rx.button(
+                                "Promover a Funcionario",
+                                on_click=State.cambiar_rol_ciudadano_a_funcionario,
+                                color_scheme="blue",
+                                width="100%",
+                                is_disabled=~(State.cambiar_rol_email != "")
+                            ),
+                            
+                            rx.cond(
+                                State.cambiar_rol_mensaje != "",
+                                rx.box(
+                                    rx.text(
+                                        State.cambiar_rol_mensaje,
+                                        color=rx.cond(
+                                            State.cambiar_rol_mensaje.contains("✅"),
+                                            "green.500",
+                                            "red.500"
+                                        ),
+                                        font_size="sm",
+                                        white_space="pre-wrap"
+                                    ),
+                                    p="4",
+                                    border_radius="md",
+                                    bg=rx.color_mode_cond(light="#f0fdf4", dark="#1f2937"),
+                                    width="100%"
+                                )
+                            ),
+                            
+                            spacing="4",
+                            align_items="stretch",
+                            width="100%"
+                        ),
+                        p="8",
+                        bg=rx.color_mode_cond(light="white", dark="#1a202c"),
+                        border_radius="2xl",
+                        box_shadow="2xl",
+                        max_width="500px",
+                        width="100%"
+                    ),
+                    
+                    spacing="4",
+                    align_items="center",
+                    width="100%"
+                ),
+                min_height="84vh"
+            ),
+            bg=rx.color_mode_cond(light="#f8fafc", dark="#0f172a")
+        ),
+        rx.container(
+            navbar(),
+            rx.center(
+                rx.vstack(
+                    rx.heading("Acceso Denegado", size="8", color="red.500"),
+                    rx.text("Solo funcionarios autenticados pueden acceder a esta función."),
+                    rx.link(rx.button("Ir al Login", color_scheme="blue"), href="/login"),
+                    spacing="4",
+                    align_items="center"
+                ),
+                min_height="84vh"
+            )
+        )
+    )
+
+
 app = rx.App()
 app.add_page(index, route="/", title="Inicio - Sistema PQRS")
 app.add_page(registro_page, route="/registro", title="Registro de Ciudadano")
@@ -3363,6 +3923,8 @@ app.add_page(solicitudes_page, route="/solicitudes", title="Nueva Solicitud PQRS
 app.add_page(change_password_page, route="/cambiar-contrasena", title="Cambiar Contraseña")
 app.add_page(dashboard, route="/dashboard", title="Panel de Ciudadano")
 app.add_page(funcionario_dashboard, route="/dashboard-funcionario", title="Panel de Funcionario")
+app.add_page(usuarios_page, route="/usuarios", title="Gestión de Usuarios")
+app.add_page(cambiar_rol_page, route="/cambiar-rol", title="Cambiar Rol de Usuario")
 app.add_page(consultar_estado_page, route="/consultar-estado", title="Consultar Estado de Solicitud")
 app.add_page(politica_privacidad_page, route="/politica-privacidad", title="Política de Privacidad")
 app.add_page(reportes_page, route="/reportes", title="Reportes PQRS")
