@@ -21,6 +21,8 @@ class Usuario(rx.Model, table=True):
     telefono: Optional[str] = None
     departamento: Optional[str] = None
     ciudad: Optional[str] = None
+    etnia: Optional[str] = None
+    persona_vulnerable: Optional[str] = None
 
 class Solicitud(rx.Model, table=True):
     "Tabla de solicitudes PQRS"
