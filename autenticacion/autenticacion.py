@@ -3514,7 +3514,7 @@ def solicitudes_page() -> rx.Component:
 
                                 # Archivo adjunto: zona arrastrar y soltar moderna
                                 rx.vstack(
-                                    rx.text("Documento adjunto (si quieres enviar mas de 2 archivos puedes ponerlos en un Zip)", font_weight="semibold"),
+                                    rx.text("Documento adjunto", font_weight="semibold"),
                                     rx.box(
                                         rx.hstack(
                                             rx.image(src="/clip-icon.svg", alt="Adjuntar", height="20px"),
@@ -3525,7 +3525,10 @@ def solicitudes_page() -> rx.Component:
                                                     color=rx.color_mode_cond(light="gray.600", dark="gray.400"),
                                                     no_wrap=False,
                                                 ),
-                                                rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB cada uno)", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
+                                                rx.text(
+                                                    "Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB cada uno)",
+                                                    color=rx.color_mode_cond(light="gray.600", dark="gray.400")
+                                                ),
                                             ),
                                             rx.spacer(),
                                             rx.cond(
