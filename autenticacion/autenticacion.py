@@ -667,7 +667,7 @@ class State(rx.State):
     def set_acepta_notificaciones(self, checked: bool):
         self.acepta_notificaciones = bool(checked)
 
-    def set_documento(self, documento: Any):
+    async def set_documento(self, documento: Any):
         """Actualiza los adjuntos cuando el ciudadano selecciona uno o varios archivos."""
         self.documentos = []
         self.documento_nombres = []
@@ -676,7 +676,6 @@ class State(rx.State):
         self.archivo_error_mensaje = ""
 
         allowed_ext = {"pdf", "png", "jpg", "jpeg"}
-        max_files = 3
         max_size = 10 * 1024 * 1024
 
         def valid_document(item: Any) -> bool:
@@ -686,6 +685,9 @@ class State(rx.State):
             elif isinstance(item, str):
                 name = os.path.basename(item)
                 size = 0
+            elif hasattr(item, "filename"):  # rx.UploadFile
+                name = item.filename or "adjunto"
+                size = getattr(item, "size", 0) or 0
             else:
                 return True
 
@@ -706,11 +708,14 @@ class State(rx.State):
             elif isinstance(item, str):
                 self.documento_nombres.append(os.path.basename(item))
                 self.documentos.append(item)
+            elif hasattr(item, "filename"):  # rx.UploadFile
+                self.documento_nombres.append(item.filename or "adjunto")
+                self.documentos.append(item)
             else:
                 self.documentos.append(item)
 
         archivos = documento if isinstance(documento, list) else [documento]
-        if len(archivos) > max_files:
+        if len(archivos) > 3:
             self.archivo_error_mensaje = "Solo puedes adjuntar hasta 3 archivos."
             return
 
@@ -1575,9 +1580,11 @@ Sistema PQRS
 
     def set_correo(self, value: str):
         self.correo = value
+        self.error_de_contraseña = ""
 
     def set_contraseña(self, value: str):
         self.contraseña = value
+        self.error_de_contraseña = ""
 
     def set_tipo_identificacion(self, value: str):
         self.tipo_identificacion = value
@@ -1977,31 +1984,36 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                     rx.text(State.succes, color="green.500", font_size="sm", font_weight="bold"),
                     rx.box(),
                 ),
-                rx.hstack(
+                rx.vstack(
                     rx.button(title, type="submit", color_scheme="blue", size="4", width={"base": "100%", "md": "220px"}),
-                    rx.link(
-                        "¿Ya tienes una cuenta? Inicia sesión",
-                        href="/login",
-                        margin_left={"base": "0", "md": "4"},
-                        color="blue.500",
-                        width={"base": "100%", "md": "auto"},
+                    rx.hstack(
+                        rx.text(
+                            "¿Ya tienes una cuenta?",
+                            color=rx.color_mode_cond(light="#444", dark="#aaa"),
+                            font_size="0.9em",
+                        ),
+                        rx.link(
+                            "Inicia sesión",
+                            href="/login",
+                            color="#0067b8",
+                            font_size="0.9em",
+                            _hover={"text_decoration": "underline"},
+                        ),
+                        spacing="1",
                     ),
-                    spacing="4",
-                    justify={"base": "center", "md": "start"},
+                    spacing="3",
+                    align_items="start",
                     width="100%",
                 ),
-                spacing="4",
-                align_items="stretch",
-                width="100%",
             ),
             on_submit=on_submit,
         ),
-        p={"base": "4", "md": "8"},
-        max_width={"base": "95%", "md": "1100px"},
-        box_shadow="2xl",
-        border_radius="2xl",
-        bg=rx.color_mode_cond(light="white", dark="#1a202c"),
-        width="100%",
+    p={"base": "4", "md": "8"},
+    max_width={"base": "95%", "md": "1100px"},
+    box_shadow="2xl",
+    border_radius="2xl",
+    bg=rx.color_mode_cond(light="white", dark="#1a202c"),
+    width="100%",
     )
 
 
@@ -2543,78 +2555,131 @@ def change_password_page() -> rx.Component:
 
 def login_page() -> rx.Component:
     return rx.vstack(
-        toast_notification(),
         rx.toast.provider(position="top-center", close_button=True, offset="20px"),
+        toast_notification(),
         navbar(),
         rx.center(
-            rx.card(
-                rx.vstack(
-                    rx.heading(
-                        "Iniciar Sesión",
-                        size={"base": "5", "md": "7"},
-                        margin_bottom="1em",
-                        color=rx.color_mode_cond(light="black", dark="white"),
-                    ),
+            rx.vstack(
+                # Logo o nombre del sistema
+                rx.image(src="/govco_logo.svg", height="36px", mb="2"),
+                rx.heading(
+                    "Iniciar sesión",
+                    size="7",
+                    font_weight="400",
+                    color=rx.color_mode_cond(light="#1a1a1a", dark="white"),
+                    margin_bottom="1.2em",
+                ),
+                # Campo correo
+                rx.input(
+                    placeholder="Correo electrónico",
+                    value=State.correo,
+                    on_change=State.set_correo,
+                    width="100%",
+                    size="3",
+                    border="1px solid #8c8c8c",
+                    border_radius="4px",
+                    _focus={"border": "2px solid #0067b8", "outline": "none"},
+                    bg=rx.color_mode_cond(light="white", dark="#1a1a2e"),
+                    color=rx.color_mode_cond(light="#1a1a1a", dark="white"),
+                    _placeholder={"color": "#666"},
+                    padding="10px 12px",
+                    height="44px",
+                ),
+                # Campo contraseña
+                rx.hstack(
                     rx.input(
-                        placeholder="Correo electrónico",
-                        value=State.correo,
-                        on_change=State.set_correo,
+                        placeholder="Contraseña",
+                        type=rx.cond(State.show_password, "text", "password"),
+                        value=State.contraseña,
+                        on_change=State.set_contraseña,
                         width="100%",
-                    ),
-                    rx.hstack(
-                        rx.input(
-                            placeholder="Contraseña",
-                            type=rx.cond(State.show_password, "text", "password"),
-                            value=State.contraseña,
-                            on_change=State.set_contraseña,
-                            width="100%",
-                        ),
-                        rx.button(
-                            rx.cond(State.show_password, rx.icon("eye_off"), rx.icon("eye")),
-                            on_click=State.toggle_show_password,
-                            variant="ghost",
-                            size="2",
-                        ),
-                        width="100%",
-                        spacing="2",
-                    ),
-                    rx.cond(
-                        State.error_de_contraseña != "",
-                        rx.text(State.error_de_contraseña, color="red.500", font_size="1em", font_weight="bold", padding="8px", bg="rgba(239, 68, 68, 0.1)", border_radius="md"),
-                        rx.box(),
-                    ),
-                    rx.cond(
-                        State.succes2 != "",
-                        rx.text(State.succes2, color="green.500", font_size="0.9em"),
-                        rx.box(),
+                        size="3",
+                        border="1px solid #8c8c8c",
+                        border_radius="4px",
+                        _focus={"border": "2px solid #0067b8", "outline": "none"},
+                        bg=rx.color_mode_cond(light="white", dark="#1a1a2e"),
+                        color=rx.color_mode_cond(light="#1a1a1a", dark="white"),
+                        _placeholder={"color": "#666"},
+                        height="44px",
                     ),
                     rx.button(
-                        "Entrar",
-                        on_click=State.login,
-                        color_scheme="blue",
-                        width="100%",
-                        margin_top="1em",
+                        rx.cond(State.show_password, rx.icon("eye_off", size=18), rx.icon("eye", size=18)),
+                        on_click=State.toggle_show_password,
+                        variant="ghost",
+                        size="2",
+                        color="#666",
+                        _hover={"bg": "transparent", "color": "#0067b8"},
+                        padding="0 8px",
+                    ),
+                    width="100%",
+                    spacing="1",
+                    align_items="center",
+                ),
+                # Mensaje de error
+                rx.cond(
+                    State.error_de_contraseña != "",
+                    rx.text(
+                        State.error_de_contraseña,
+                        color="#d93025",
+                        font_size="0.85em",
+                        mt="-8px",
+                    ),
+                    rx.box(),
+                ),
+                rx.cond(
+                    State.succes2 != "",
+                    rx.text(State.succes2, color="green.500", font_size="0.85em"),
+                    rx.box(),
+                ),
+                # Botón siguiente (estilo Microsoft)
+                rx.button(
+                    "Entrar",
+                    on_click=State.login,
+                    width="100%",
+                    height="44px",
+                    bg="#0067b8",
+                    color="white",
+                    border_radius="4px",
+                    font_size="1em",
+                    font_weight="600",
+                    _hover={"bg": "#005a9e", "cursor": "pointer"},
+                    _active={"bg": "#004f8b"},
+                    border="none",
+                    margin_top="0.5em",
+                ),
+                # Link registro
+                rx.hstack(
+                    rx.text(
+                        "¿No tienes cuenta?",
+                        color=rx.color_mode_cond(light="#444", dark="#aaa"),
+                        font_size="0.9em",
                     ),
                     rx.link(
-                        "¿No tienes cuenta? Regístrate",
+                        "Regístrate",
                         href="/registro",
-                        font_size="0.8em",
-                        color="#60a5fa",
+                        color="#0067b8",
+                        font_size="0.9em",
+                        _hover={"text_decoration": "underline"},
                     ),
-                    spacing="4",
-                    padding={"base": "1em", "md": "1.5em"},
+                    spacing="1",
                 ),
-                width={"base": "90%", "md": "400px"},
-                max_width="95%",
-                box_shadow="lg",
-                border_radius="15px",
+                spacing="4",
+                align_items="stretch",
+                width="440px",
+                padding="44px 44px 36px 44px",
+                bg=rx.color_mode_cond(light="white", dark="#1e1e2e"),
+                border="1px solid",
+                border_color=rx.color_mode_cond(light="#e0e0e0", dark="#333"),
+                border_radius="8px",
+                box_shadow="0 2px 12px rgba(0,0,0,0.10)",
             ),
             width="100%",
-            min_height="85vh",
+            min_height="80vh",
         ),
-        bg=rx.color_mode_cond(light="#f4f4f5", dark="#0f172a"),
+        bg=rx.color_mode_cond(light="#f5f5f5", dark="#0f172a"),
         width="100%",
         min_height="100vh",
+        spacing="0",
     )
 
 
@@ -2711,7 +2776,7 @@ def dashboard() -> rx.Component:
                                                 rx.text(
                                                     solicitud["fecha"],
                                                     font_size="xs",
-                                                    color="gray.400"
+                                                    color=rx.color_mode_cond(light="gray.500", dark="gray.400")
                                                 ),
                                             ),
                                             rx.text(
@@ -2725,12 +2790,12 @@ def dashboard() -> rx.Component:
                                                 solicitud["asunto"],
                                                 font_weight="semibold",
                                                 font_size="sm",
-                                                color=rx.color_mode_cond(light="gray.800", dark="white")
+                                                color=rx.color_mode_cond(light="#111827", dark="#f1f5f9")
                                             ),
                                             rx.text(
                                              solicitud["descripcion"],
                                              font_size="sm",
-                                              color=rx.color_mode_cond(light="gray.600", dark="gray.300"),
+                                              color=rx.color_mode_cond(light="#374151", dark="#e5e7eb"),
                                               style={
                                               "display": "-webkit-box",
                                               "WebkitLineClamp": "3",
@@ -3013,11 +3078,11 @@ def funcionario_dashboard() -> rx.Component:
                                             rx.vstack(
                                                 rx.hstack(
                                                     rx.vstack(
-                                                        rx.heading(f"Radicado: {solicitud['radicado']}", size="4", color=rx.color_mode_cond(light="#1e40af", dark="#60a5fa")),
-                                                        rx.text(f"Tipo: {solicitud['tipo_solicitud']}", font_weight="semibold", color=rx.color_mode_cond(light="gray.700", dark="gray.300"), font_size="sm"),
+                                                        rx.heading(f"Radicado: {solicitud['radicado']}", size="4", color=rx.color_mode_cond(light="#0f172a", dark="#e0e7ff")),
+                                                        rx.text(f"Tipo: {solicitud['tipo_solicitud']}", font_weight="semibold", color=rx.color_mode_cond(light="#1f2937", dark="#f3f4f6"), font_size="sm"),
                                                         rx.cond(
                                                             (solicitud.get("persona_vulnerable") != None) & (solicitud.get("persona_vulnerable") != "Ninguna"),
-                                                            rx.text(f"Característica: {solicitud['persona_vulnerable']}", color=rx.color_mode_cond(light="gray.600", dark="gray.400"), font_size="sm")
+                                                            rx.text(f"Característica: {solicitud['persona_vulnerable']}", color=rx.color_mode_cond(light="#374151", dark="#e5e7eb"), font_size="sm")
                                                         ),
                                                         spacing="1"
                                                     ),
@@ -3036,21 +3101,21 @@ def funcionario_dashboard() -> rx.Component:
                                                 ),
                                                 rx.divider(),
                                                 rx.vstack(
-                                    rx.text(f"Asunto: {solicitud['asunto']}", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
-                                    rx.text(f"Descripción: {solicitud['descripcion']}", color=rx.color_mode_cond(light="gray.700", dark="gray.200")),
-                                    rx.text(f"Creado por: {solicitud.get('creado_por', 'Desconocido')}", color=rx.color_mode_cond(light="gray.600", dark="gray.400"), font_size="sm"),
-                                    rx.text(f"Fecha: {solicitud['fecha']}", color=rx.color_mode_cond(light="gray.600", dark="gray.400"), font_size="sm"),
+                                    rx.text(f"Asunto: {solicitud['asunto']}", font_weight="semibold", color=rx.color_mode_cond(light="#111827", dark="#f1f5f9")),
+                                    rx.text(f"Descripción: {solicitud['descripcion']}", color=rx.color_mode_cond(light="#374151", dark="#e5e7eb")),
+                                    rx.text(f"Creado por: {solicitud.get('creado_por', 'Desconocido')}", color=rx.color_mode_cond(light="#4b5563", dark="#d1d5db"), font_size="sm"),
+                                    rx.text(f"Fecha: {solicitud['fecha']}", color=rx.color_mode_cond(light="#4b5563", dark="#d1d5db"), font_size="sm"),
                                                 ),
 
                                                 rx.cond(
                                                     solicitud.get("area_responsable") != None,
-                                                    rx.text(f"Área: {solicitud['area_responsable']}", color=rx.color_mode_cond(light="gray.600", dark="gray.400"), font_size="sm"),
+                                                    rx.text(f"Área: {solicitud['area_responsable']}", color=rx.color_mode_cond(light="#4b5563", dark="#d1d5db"), font_size="sm"),
                                                     rx.text("")
                                                 ),
                                                 rx.cond(
                                                     solicitud.get("documento_basename"),
                                                     rx.vstack(
-                                                        rx.text("Documento adjunto:", color=rx.color_mode_cond(light="gray.600", dark="gray.400"), font_size="sm"),
+                                                        rx.text("Documento adjunto:", color=rx.color_mode_cond(light="#374151", dark="#e5e7eb"), font_size="sm"),
                                                         rx.hstack(
                                                             rx.icon("paperclip", size=16),
                                                             rx.link(
@@ -3066,7 +3131,7 @@ def funcionario_dashboard() -> rx.Component:
                                                             align_items="center"
                                                         )
                                                     ),
-                                                    rx.text("Sin documentos adjuntos", color=rx.color_mode_cond(light="gray.500", dark="gray.500"), font_size="sm")
+                                                    rx.text("Sin documentos adjuntos", color=rx.color_mode_cond(light="#6b7280", dark="#9ca3af"), font_size="sm")
                                                 ),
                                                 # Botones de acción para actualizar estado
                                                 rx.hstack(
@@ -3090,12 +3155,11 @@ def funcionario_dashboard() -> rx.Component:
                                                 align_items="start"
                                             ),
                                             p="5",
-                                            border="1px solid #e2e8f0",
+                                            border="1px solid #cbd5e0",
                                             border_radius="lg",
-                                            bg="white",
-                                            _dark={"bg": "gray.800", "borderColor": "gray.700"},
+                                            bg=rx.color_mode_cond(light="#ffffff", dark="#1f2937"),
                                             width="100%",
-                                            _hover={"box_shadow": "md", "border_color": "#3b82f6"}
+                                            _hover={"box_shadow": "lg", "border_color": "#3b82f6"}
                                         )
                                     ),
                                     spacing="4"
