@@ -404,6 +404,8 @@ class State(rx.State):
             self.archivo_error_mensaje = str(e)
             self.mostrar_toast("Error exportando reportes.", "error")
 
+=======
+>>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
     def ocultar_toast(self):
         self.toast_visible = False
         self.toast_mensaje = ""
@@ -494,6 +496,8 @@ class State(rx.State):
             counts[a] = counts.get(a, 0) + 1
         items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:3]
         return [{"name": name, "total": total} for name, total in items]
+=======
+>>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
     
     @rx.var
     def solicitudes_filtradas(self) -> list[dict]:
@@ -530,6 +534,7 @@ class State(rx.State):
             if isinstance(item, dict):
                 total += int(item.get("size") or 0)
         return f"{total / (1024 * 1024):.2f} MB"
+>>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
     
     @rx.var
     def usuarios_registrados_count(self) -> int:
@@ -760,6 +765,10 @@ class State(rx.State):
 
     def set_documento(self, documento: Any):
         """Actualiza los adjuntos cuando el ciudadano selecciona uno o varios archivos."""
+        self.documentos = []
+        self.documento_nombres = []
+        self.documento = ""
+        self.documento_nombre = ""
         self.archivo_error_mensaje = ""
 
         allowed_ext = {"pdf", "png", "jpg", "jpeg"}
@@ -770,6 +779,12 @@ class State(rx.State):
             if isinstance(item, dict):
                 name = item.get("name") or item.get("filename") or "adjunto"
                 size = int(item.get("size") or 0)
+        max_size = 10 * 1024 * 1024
+
+        def valid_document(item: Any) -> bool:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("filename") or "adjunto"
+                size = item.get("size") or 0
             elif isinstance(item, str):
                 name = os.path.basename(item)
                 size = 0
@@ -791,11 +806,15 @@ class State(rx.State):
         def valid_document(item: Any) -> bool:
             name = get_name(item)
             size = get_size(item)
+
+            return True
+
             ext = os.path.splitext(name)[1].lower().lstrip(".")
             if ext not in allowed_ext:
                 self.archivo_error_mensaje = "Solo se aceptan archivos PDF, PNG o JPG."
                 return False
             if size > max_total_size:
+            if size and size > max_size:
                 self.archivo_error_mensaje = "Cada archivo no puede superar los 10MB."
                 return False
             return True
@@ -807,6 +826,12 @@ class State(rx.State):
                 self.documentos.append(item)
             elif isinstance(item, str):
                 self.documento_nombres.append(name)
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("filename") or "adjunto"
+                self.documento_nombres.append(name)
+                self.documentos.append(item)
+            elif isinstance(item, str):
+                self.documento_nombres.append(os.path.basename(item))
                 self.documentos.append(item)
             else:
                 self.documentos.append(item)
@@ -835,6 +860,14 @@ class State(rx.State):
 
         for item in nuevos_archivos:
             if not valid_document(item):
+        if len(archivos) > max_files:
+            self.archivo_error_mensaje = "Solo puedes adjuntar hasta 3 archivos."
+            return
+
+        for item in archivos:
+            if not valid_document(item):
+                self.documentos = []
+                self.documento_nombres = []
                 return
             append_document(item)
 
@@ -976,6 +1009,8 @@ class State(rx.State):
                     documento_respuesta_guardado = str(self.respuesta_documento)
             except Exception as e:
                 print(f"Error guardando documento de respuesta: {e}")
+                # Continuamos sin guardar el documento
+        
         try:
             with Session(engine) as session:
                 solicitud_obj = session.get(Solicitud, self.editar_estado_id)
@@ -1188,6 +1223,8 @@ Sistema PQRS
         documento_href = documento_adjuntos[0]["href"] if documento_adjuntos else ""
 
         result = {
+        return {
+>>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
             "id": solicitud.id,
             "radicado": solicitud.radicado,
             "tipo_solicitud": solicitud.tipo_solicitud,
@@ -1226,6 +1263,8 @@ Sistema PQRS
 
         return result
 
+=======
+>>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
     @rx.var
     def solicitud_consultada_adjuntos(self) -> list[dict[str, str]]:
         docs = self.solicitud_consultada.get("documento_adjuntos", [])
@@ -1254,6 +1293,7 @@ Sistema PQRS
                 print("DEBUG - cargar_solicitudes - data_grafica_tipo:", self.data_grafica_tipo)
                 print("DEBUG - cargar_solicitudes - monthly_response_times:", self.monthly_response_times)
                 print("DEBUG - cargar_solicitudes - compliance_chart_data:", self.compliance_chart_data)
+
         except Exception as e:
             print(f"Error cargando solicitudes: {e}")
             self.solicitudes = []
@@ -3645,6 +3685,7 @@ def solicitudes_page() -> rx.Component:
                                                     no_wrap=False,
                                                 ),
                                                 rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB en total)", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
+                                                rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB cada uno)", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                                             ),
                                             rx.spacer(),
                                             rx.cond(
@@ -3682,6 +3723,8 @@ def solicitudes_page() -> rx.Component:
                                         )
                                     ),
                                     rx.cond(
+=======
+>>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
                                         State.archivo_error_mensaje,
                                         rx.text(State.archivo_error_mensaje, color="red.500", font_size="sm", mt="2"),
                                     )
@@ -4110,6 +4153,88 @@ def reportes_page() -> rx.Component:
             )
         )
     )
+=======
+    return rx.container(
+        navbar(),
+        rx.center(
+            rx.card(
+                rx.vstack(
+                    rx.heading("Reportes por tipo y tiempo", size="8", color=rx.color_mode_cond(light="black", dark="white")),
+                    rx.text(
+                        "Visualiza el comportamiento de las solicitudes con indicadores y gráficos claros.",
+                        color=rx.color_mode_cond(light="gray.600", dark="gray.400")
+                    ),
+                    rx.hstack(
+                        rx.box(
+                            rx.heading("Total de Solicitudes", size="5", color="black"),
+                            rx.text(State.numero_solicitudes, font_size="3xl", font_weight="bold", color="blue.600")
+                        ),
+                        rx.box(
+                            rx.heading("Radicadas", size="5", color="black"),
+                            rx.text(State.numero_solicitudes_radicadas, font_size="3xl", font_weight="bold", color="orange.600")
+                        ),
+                        rx.box(
+                            rx.heading("Actualizadas", size="5", color="black"),
+                            rx.text(State.numero_solicitudes_actualizadas, font_size="3xl", font_weight="bold", color="blue.600")
+                        ),
+                        rx.box(
+                            rx.heading("Cerradas", size="5", color="black"),
+                            rx.text(State.numero_solicitudes_cerradas, font_size="3xl", font_weight="bold", color="green.600")
+                        ),
+                        width="100%",
+                        spacing="4",
+                        wrap="wrap"
+                    ),
+                    rx.box(
+                        rx.vstack(
+                            rx.heading("Solicitudes por tipo", size="6", color="black"),
+                            grafica_barra("Petición", tipo_counts.get("Petición", 0), "#2563eb"),
+                            grafica_barra("Queja", tipo_counts.get("Queja", 0), "#f59e0b"),
+                            grafica_barra("Reclamo", tipo_counts.get("Reclamo", 0), "#ef4444"),
+                            grafica_barra("Sugerencia", tipo_counts.get("Sugerencia", 0), "#10b981"),
+                            spacing="4",
+                            width="100%"
+                        ),
+                        p="5",
+                        border="1px solid #e2e8f0",
+                        border_radius="xl",
+                        bg=rx.color_mode_cond(light="#f8fafc", dark="#111827"),
+                        width="100%"
+                    ),
+                    rx.box(
+                        rx.vstack(
+                            rx.heading("Resumen por estado", size="6", color="black"),
+                            grafica_barra("Radicada", State.numero_solicitudes_radicadas, "#f59e0b"),
+                            grafica_barra("Actualizada", State.numero_solicitudes_actualizadas, "#3b82f6"),
+                            grafica_barra("Cerrada", State.numero_solicitudes_cerradas, "#10b981"),
+                            spacing="4",
+                            width="100%"
+                        ),
+                        p="5",
+                        border="1px solid #e2e8f0",
+                        border_radius="xl",
+                        bg=rx.color_mode_cond(light="#f8fafc", dark="#111827"),
+                        width="100%"
+                    ),
+                    rx.text(
+                        "Estas gráficas te permiten comparar rápidamente el volumen de solicitudes por tipo y el estado actual del flujo de atención.",
+                        color=rx.color_mode_cond(light="gray.600", dark="gray.400")
+                    ),
+                    spacing="6",
+                    width="100%"
+                ),
+                max_width="1000px",
+                p="8",
+                box_shadow="2xl",
+                border_radius="2xl",
+                bg=rx.color_mode_cond(light="white", dark="#1a202c")
+            ),
+            size="3"
+        ),
+        bg=rx.color_mode_cond(light="#f8fafc", dark="#0f172a")
+    )
+
+>>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
 
 def usuarios_page() -> rx.Component:
     """Página para que funcionarios vean la lista de usuarios registrados."""
@@ -4309,6 +4434,8 @@ app.add_page(cambiar_rol_page, route="/cambiar-rol", title="Cambiar Rol de Usuar
 app.add_page(consultar_estado_page, route="/consultar-estado", title="Consultar Estado de Solicitud")
 app.add_page(politica_privacidad_page, route="/politica-privacidad", title="Política de Privacidad")
 app.add_page(reportes_page, route="/reportes", title="Reportes PQRS", on_load=State.cargar_solicitudes)
+=======
+app.add_page(reportes_page, route="/reportes", title="Reportes PQRS")
 
 if app._api is not None:
     app._api.mount(
