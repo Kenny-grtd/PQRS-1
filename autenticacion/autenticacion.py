@@ -25,6 +25,9 @@ UPLOAD_DIR = BASE_DIR / "assets" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 from typing import Any
 
+# Almacenamiento temporal para descargas (limpieza automática después de acceso)
+TEMP_DOWNLOADS = {}
+
 # Cargar variables de entorno
 load_dotenv()
 DEFAULT_DATABASE_PATH = BASE_DIR / "reflex.db"
@@ -349,6 +352,8 @@ class State(rx.State):
     consulta_mensaje: str = ""
     # Enlace generado tras exportar reportes (archivo descargable)
     export_href: str = ""
+    export_filename: str = ""
+    mostrar_menu_descarga: bool = False
 
     @rx.var
     def ciudades_disponibles(self) -> list[str]:
@@ -381,34 +386,115 @@ class State(rx.State):
         self.toast_visible = True
 
     def export_reportes_csv(self):
-        """Genera un CSV con el volumen por tipo y devuelve un enlace para descarga."""
+        """Genera un CSV en memoria desde `self.solicitudes` para descarga."""
         try:
             import csv
+            import io
             from datetime import datetime
 
-            counts = self.estadisticas_por_tipo
+            data = self.solicitudes or []
+            if not data:
+                self.mostrar_toast("No hay datos para exportar.", "warning")
+                self.mostrar_menu_descarga = False
+                return
+            
+            # Generar CSV en memoria
+            output = io.StringIO()
+            if data and isinstance(data[0], dict):
+                writer = csv.DictWriter(output, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+            else:
+                output.write("Error: Datos en formato inválido")
+            
+            # Guardar en almacenamiento temporal
+            csv_bytes = output.getvalue().encode('utf-8')
             filename = f"reportes_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.csv"
-            path = os.path.join(UPLOAD_DIR, filename)
-            os.makedirs(UPLOAD_DIR, exist_ok=True)
-            with open(path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["tipo", "cantidad"])
-                for tipo in ["Petición", "Queja", "Reclamo", "Sugerencia"]:
-                    writer.writerow([tipo, counts.get(tipo, 0)])
-                writer.writerow(["Total", sum(counts.get(t, 0) for t in counts)])
-
-            # Establecer enlace público para descarga
-            self.export_href = f"/assets/uploads/{filename}"
-            self.mostrar_toast("Reporte exportado correctamente.", "success")
+            download_id = str(uuid.uuid4())
+            
+            TEMP_DOWNLOADS[download_id] = {
+                "data": csv_bytes,
+                "filename": filename,
+                "mime": "text/csv; charset=utf-8"
+            }
+            
+            self.export_filename = filename
+            self.mostrar_toast(f"✓ CSV generado. {len(data)} registros. Descargando...", "success")
+            self.mostrar_menu_descarga = False
+            self.export_href = f"/api/download/{download_id}"
+            
         except Exception as e:
-            self.archivo_error_mensaje = str(e)
-            self.mostrar_toast("Error exportando reportes.", "error")
+            print(f"ERROR en export_reportes_csv: {type(e).__name__}: {e}")
+            self.mostrar_toast(f"Error: {str(e)[:100]}", "error")
+            self.mostrar_menu_descarga = False
 
-=======
->>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
+    def descargar_excel_y_abrir(self):
+        """Genera Excel en memoria y dispara la descarga."""
+        try:
+            import io
+            from datetime import datetime
+            import pandas as pd
+
+            data = self.solicitudes or []
+            if not data:
+                self.mostrar_toast("No hay datos para exportar.", "warning")
+                return
+
+            df = pd.DataFrame(data)
+            output = io.BytesIO()
+            df.to_excel(output, index=False, sheet_name="Solicitudes", engine="openpyxl")
+            output.seek(0)
+
+            filename = f"reportes_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.xlsx"
+            return rx.download(
+                data=output.read(),
+                filename=filename,
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        except ModuleNotFoundError:
+            self.mostrar_toast("No está instalado pandas para exportar Excel.", "error")
+        except Exception as e:
+            print(f"ERROR en descargar_excel_y_abrir: {e}")
+            self.mostrar_toast(f"Error exportando Excel: {str(e)[:100]}", "error")
+
+    def descargar_csv_y_abrir(self):
+        """Genera CSV en memoria y dispara la descarga."""
+        try:
+            import csv
+            import io
+            from datetime import datetime
+
+            data = self.solicitudes or []
+            if not data:
+                self.mostrar_toast("No hay datos para exportar.", "warning")
+                return
+
+            output = io.StringIO()
+            if data and isinstance(data[0], dict):
+                writer = csv.DictWriter(output, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+            else:
+                output.write("Error: Datos en formato inválido")
+
+            filename = f"reportes_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.csv"
+            return rx.download(
+                data=output.getvalue().encode('utf-8'),
+                filename=filename,
+                mime_type="text/csv; charset=utf-8"
+            )
+        except Exception as e:
+            print(f"ERROR en descargar_csv_y_abrir: {e}")
+            self.mostrar_toast(f"Error exportando CSV: {str(e)[:100]}", "error")
+
+
     def ocultar_toast(self):
         self.toast_visible = False
         self.toast_mensaje = ""
+
+    def toggle_menu_descarga(self):
+        """Alterna la visibilidad del menú de descarga."""
+        self.mostrar_menu_descarga = not self.mostrar_menu_descarga
         
      
     @rx.var
@@ -496,8 +582,6 @@ class State(rx.State):
             counts[a] = counts.get(a, 0) + 1
         items = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:3]
         return [{"name": name, "total": total} for name, total in items]
-=======
->>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
     
     @rx.var
     def solicitudes_filtradas(self) -> list[dict]:
@@ -534,7 +618,6 @@ class State(rx.State):
             if isinstance(item, dict):
                 total += int(item.get("size") or 0)
         return f"{total / (1024 * 1024):.2f} MB"
->>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
     
     @rx.var
     def usuarios_registrados_count(self) -> int:
@@ -814,7 +897,7 @@ class State(rx.State):
                 self.archivo_error_mensaje = "Solo se aceptan archivos PDF, PNG o JPG."
                 return False
             if size > max_total_size:
-            if size and size > max_size:
+             if size and size > max_size:
                 self.archivo_error_mensaje = "Cada archivo no puede superar los 10MB."
                 return False
             return True
@@ -860,6 +943,9 @@ class State(rx.State):
 
         for item in nuevos_archivos:
             if not valid_document(item):
+                self.documentos = []
+                self.documento_nombres = []
+                return
         if len(archivos) > max_files:
             self.archivo_error_mensaje = "Solo puedes adjuntar hasta 3 archivos."
             return
@@ -1222,9 +1308,7 @@ Sistema PQRS
         documento_basename = documento_adjuntos[0]["basename"] if documento_adjuntos else ""
         documento_href = documento_adjuntos[0]["href"] if documento_adjuntos else ""
 
-        result = {
         return {
->>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
             "id": solicitud.id,
             "radicado": solicitud.radicado,
             "tipo_solicitud": solicitud.tipo_solicitud,
@@ -1244,8 +1328,11 @@ Sistema PQRS
             "respuesta_documento_href": f"/assets/uploads/{quote(respuesta_documento_basename)}" if respuesta_documento_basename else "",
             "fecha": solicitud.fecha.strftime("%Y-%m-%d %H:%M") if isinstance(solicitud.fecha, datetime) else str(solicitud.fecha),
             "creado_por": solicitud.creado_por,
-            "usuario_id": solicitud.usuario_id,
+           "usuario_id": solicitud.usuario_id,
+        
+        
         }
+        
 
         # Extraer metadata embebida en `documento` si existe (usado para pruebas/seed)
         try:
@@ -1262,9 +1349,9 @@ Sistema PQRS
             pass
 
         return result
+        
+        
 
-=======
->>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
     @rx.var
     def solicitud_consultada_adjuntos(self) -> list[dict[str, str]]:
         docs = self.solicitud_consultada.get("documento_adjuntos", [])
@@ -1299,28 +1386,94 @@ Sistema PQRS
             self.solicitudes = []
 
     def export_reportes_excel(self):
-        """Genera un Excel en memoria desde `self.solicitudes` y devuelve un evento `rx.download`.
-
-        Requiere `pandas` instalado en el entorno. Retorna un EventSpec que el frontend
-        ejecutará para iniciar la descarga del archivo.
+        """Genera un Excel en memoria desde `self.solicitudes` para descarga.
+        
+        Si pandas no está disponible, genera un CSV como fallback.
         """
         try:
-            import pandas as pd
-            from io import BytesIO
+            import io
+            from datetime import datetime
 
             data = self.solicitudes or []
-            df = pd.DataFrame(data)
-            buf = BytesIO()
-            with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-                df.to_excel(writer, index=False, sheet_name="Solicitudes")
-            buf.seek(0)
-            content = buf.read()
-            filename = f"reportes_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.xlsx"
-            return rx.download(data=content, filename=filename, mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            if not data:
+                self.mostrar_toast("No hay datos para exportar.", "warning")
+                self.mostrar_menu_descarga = False
+                return
+            
+            # Intentar con Excel primero
+            try:
+                import pandas as pd
+                print(f"DEBUG: Generando Excel en memoria con {len(data)} registros")
+                
+                df = pd.DataFrame(data)
+                
+                # Usar BytesIO para guardar en memoria
+                output = io.BytesIO()
+                df.to_excel(output, index=False, sheet_name="Solicitudes", engine="openpyxl")
+                output.seek(0)
+                
+                excel_bytes = output.getvalue()
+                filename = f"reportes_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}.xlsx"
+                download_id = str(uuid.uuid4())
+                
+                TEMP_DOWNLOADS[download_id] = {
+                    "data": excel_bytes,
+                    "filename": filename,
+                    "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                }
+                
+                self.export_filename = filename
+                self.mostrar_toast(f"✓ Excel generado. {len(data)} registros. Descargando...", "success")
+                self.mostrar_menu_descarga = False
+                self.export_href = f"/api/download/{download_id}"
+                
+            except (ImportError, ModuleNotFoundError) as e:
+                print(f"DEBUG: pandas no disponible, usando CSV: {e}")
+                # Fallback a CSV
+                self.export_reportes_csv()
+                
         except Exception as e:
-            print("Error exportando Excel en memoria:", e)
-            self.mostrar_toast("Error exportando Excel. Revisa dependencias (pandas, xlsxwriter).", "error")
-            return None
+            print(f"ERROR CRITICO en export_reportes_excel: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            self.mostrar_toast(f"Error: {str(e)[:100]}", "error")
+            self.mostrar_menu_descarga = False
+
+
+    def descargar_reporte_excel(self):
+        """Descarga el archivo Excel generado."""
+        try:
+            if not self.export_filename:
+                self.mostrar_toast("No hay archivo para descargar.", "warning")
+                return
+            
+            filepath = os.path.join(UPLOAD_DIR, self.export_filename)
+            print(f"DEBUG: Intentando descargar {filepath}")
+            
+            if not os.path.exists(filepath):
+                self.mostrar_toast(f"Archivo no encontrado: {self.export_filename}", "error")
+                self.export_filename = ""
+                self.export_href = ""
+                return
+            
+            # Leer el archivo y preparar para descarga
+            with open(filepath, 'rb') as f:
+                content = f.read()
+            
+            print(f"DEBUG: Archivo leído. Tamaño: {len(content)} bytes")
+            
+            # Usar rx.download para forzar la descarga
+            return rx.download(
+                data=content,
+                filename=self.export_filename,
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            
+        except Exception as e:
+            print(f"ERROR en descargar_reporte_excel: {e}")
+            import traceback
+            traceback.print_exc()
+            self.mostrar_toast(f"Error descargando: {str(e)}", "error")
 
     def _validar_registro_basico(self) -> None:
         self.error_de_registro = ""
@@ -1446,6 +1599,7 @@ Sistema PQRS
                 description="Redirigiendo automáticamente...",
                 on_auto_close=State.redirect_after_login,
             )
+        
 
     def redirect_after_login(self):
         if self.rol_usuario == "funcionario":
@@ -3684,7 +3838,6 @@ def solicitudes_page() -> rx.Component:
                                                     color=rx.color_mode_cond(light="gray.600", dark="gray.400"),
                                                     no_wrap=False,
                                                 ),
-                                                rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB en total)", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                                                 rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB cada uno)", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                                             ),
                                             rx.spacer(),
@@ -3723,8 +3876,6 @@ def solicitudes_page() -> rx.Component:
                                         )
                                     ),
                                     rx.cond(
-=======
->>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
                                         State.archivo_error_mensaje,
                                         rx.text(State.archivo_error_mensaje, color="red.500", font_size="sm", mt="2"),
                                     )
@@ -4003,7 +4154,39 @@ def reportes_page() -> rx.Component:
                     rx.select(["Todos", "Petición", "Queja", "Reclamo", "Sugerencia"], placeholder="Tipo de Solicitud", width="220px"),
                     rx.select(["Todos", "Atención al Cliente", "Trámites", "Soporte"], placeholder="Área Responsable", width="220px"),
                     rx.spacer(),
-                    rx.hstack(rx.button("Exportar Excel", on_click=State.export_reportes_excel, color_scheme="blue"), rx.cond(State.export_href, rx.link("Descargar", href=State.export_href)), spacing="3"),
+                    rx.vstack(
+                        rx.button("📥 Descargar CSV", on_click=State.toggle_menu_descarga, color_scheme="blue", width="160px"),
+                        rx.cond(
+                            State.mostrar_menu_descarga,
+                            rx.vstack(
+                                rx.button("📊 Descargar Excel", on_click=State.descargar_excel_y_abrir, color_scheme="green", width="160px", size="1"),
+                                rx.button("📋 Descargar CSV", on_click=State.descargar_csv_y_abrir, color_scheme="cyan", width="160px", size="1"),
+                                spacing="2",
+                                position="absolute",
+                                bg="white",
+                                border="1px solid #e2e8f0",
+                                border_radius="md",
+                                p="2",
+                                box_shadow="lg",
+                                z_index="10",
+                                mt="-2",
+                            ),
+                            rx.box()
+                        ),
+                        spacing="2",
+                        position="relative",
+                    ),
+                    rx.cond(
+                        State.export_href,
+                        rx.link(
+                            "⬇️ Descargar",
+                            href=State.export_href,
+                            is_external=True,
+                            target="_blank",
+                            _hover={"text_decoration": "underline"}
+                        ),
+                        rx.box()
+                    ),
                     width="100%",
                     spacing="4",
                 ),
@@ -4153,7 +4336,6 @@ def reportes_page() -> rx.Component:
             )
         )
     )
-=======
     return rx.container(
         navbar(),
         rx.center(
@@ -4234,7 +4416,6 @@ def reportes_page() -> rx.Component:
         bg=rx.color_mode_cond(light="#f8fafc", dark="#0f172a")
     )
 
->>>>>>> 6825c02dd38c2e85ba01badd769f12cf6b616b92
 
 def usuarios_page() -> rx.Component:
     """Página para que funcionarios vean la lista de usuarios registrados."""
@@ -4434,8 +4615,6 @@ app.add_page(cambiar_rol_page, route="/cambiar-rol", title="Cambiar Rol de Usuar
 app.add_page(consultar_estado_page, route="/consultar-estado", title="Consultar Estado de Solicitud")
 app.add_page(politica_privacidad_page, route="/politica-privacidad", title="Política de Privacidad")
 app.add_page(reportes_page, route="/reportes", title="Reportes PQRS", on_load=State.cargar_solicitudes)
-=======
-app.add_page(reportes_page, route="/reportes", title="Reportes PQRS")
 
 if app._api is not None:
     app._api.mount(
@@ -4443,4 +4622,38 @@ if app._api is not None:
         StaticFiles(directory=str(UPLOAD_DIR), check_dir=False),
         name="uploads",
     )
-
+    
+    # Endpoints para descargas con "Guardar como"
+    from starlette.responses import Response
+    
+    async def download_file(download_id: str):
+        """Descarga un archivo del almacenamiento temporal."""
+        try:
+            if download_id not in TEMP_DOWNLOADS:
+                return Response(
+                    content=b"Archivo no encontrado o expirado",
+                    status_code=404,
+                    media_type="text/plain"
+                )
+            
+            file_data = TEMP_DOWNLOADS[download_id]
+            filename = file_data.get("filename", "descargar.bin")
+            data = file_data.get("data", b"")
+            mime = file_data.get("mime", "application/octet-stream")
+            
+            # Limpiar después de acceder (descarga única)
+            del TEMP_DOWNLOADS[download_id]
+            
+            return Response(
+                content=data,
+                media_type=mime,
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+        except Exception as e:
+            print(f"Error en download_file: {e}")
+            return Response(
+                content=b"Error al descargar el archivo",
+                status_code=500,
+                media_type="text/plain"
+            )
+    
