@@ -31,6 +31,44 @@ TEMP_DOWNLOADS = {}
 
 # Cargar variables de entorno
 load_dotenv()
+# Ruta para configuración de correo almacenada por la app (opcional)
+EMAIL_CONFIG_PATH = BASE_DIR / "email_config.json"
+
+
+def load_email_config() -> dict:
+    """Carga configuración de correo desde `email_config.json` si existe y
+    aplica valores a `os.environ` cuando sea apropiado.
+    """
+    try:
+        if EMAIL_CONFIG_PATH.exists():
+            with open(EMAIL_CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            # Aplicar solo si no están en env ya (permite override por .env)
+            for k, v in cfg.items():
+                if v is None:
+                    continue
+                os.environ.setdefault(k, str(v))
+            return cfg
+    except Exception as e:
+        print("No se pudo cargar email_config.json:", e)
+    return {}
+
+
+def save_email_config(cfg: dict) -> None:
+    try:
+        with open(EMAIL_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f)
+        # Also ensure it's available in current process env for immediate use
+        for k, v in cfg.items():
+            if v is None:
+                continue
+            os.environ[k] = str(v)
+    except Exception as e:
+        print("No se pudo guardar email_config.json:", e)
+
+
+# Load persisted email config on startup (if any)
+_EMAIL_CONFIG_CACHE = load_email_config()
 DEFAULT_DATABASE_PATH = BASE_DIR / "reflex.db"
 DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
@@ -101,27 +139,25 @@ def sanitizar_nombre_archivo(nombre: str) -> str:
 
 
 def enviar_correo_bienvenida(email_destinatario: str, email_usuario: str):
-    """Envía un correo de bienvenida con las credenciales de acceso"""
+    """Envía un correo de bienvenida. Intenta SMTP si `EMAIL_PASSWORD` está disponible;
+    si no está o falla, intenta `SENDGRID_API_KEY`. Si todo falla, guarda el correo en
+    `failed_emails.log` para reintento manual.
+    """
     try:
-        # Obtener credenciales del archivo .env
-        email_sender = os.getenv("EMAIL_SENDER")
+        # Credenciales y configuración
+        email_sender = os.getenv("EMAIL_SENDER", "enlacepqrs1755@gmail.com")
         email_password = os.getenv("EMAIL_PASSWORD")
+        sendgrid_key = os.getenv("SENDGRID_API_KEY")
         smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
         smtp_port = int(os.getenv("SMTP_PORT", "587"))
         empresa_nombre = os.getenv("EMPRESA_NOMBRE", "Sistema de Gestión de PQRS")
-        
-        # Validar que existan credenciales
-        if not email_sender or not email_password:
-            print("⚠️ Advertencia: Credenciales de correo no configuradas en .env")
-            return False
-        
-        # Crear mensaje
+
+        # Construir mensaje HTML
         mensaje = MIMEMultipart("alternative")
         mensaje["Subject"] = f"¡Bienvenido a {empresa_nombre}!"
         mensaje["From"] = email_sender
         mensaje["To"] = email_destinatario
-        
-        # Contenido del correo en HTML
+
         html = f"""
         <html>
             <body style="font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 20px;">
@@ -147,25 +183,69 @@ def enviar_correo_bienvenida(email_destinatario: str, email_usuario: str):
             </body>
         </html>
         """
-        
-        # Adjuntar el contenido
+
         parte_html = MIMEText(html, "html")
         mensaje.attach(parte_html)
-        
-        # Enviar correo
-        with smtplib.SMTP(smtp_server, smtp_port) as servidor:
-            servidor.starttls()
-            servidor.login(email_sender, email_password)
-            servidor.sendmail(email_sender, email_destinatario, mensaje.as_string())
-        
-        print(f"✅ Correo enviado exitosamente a {email_destinatario}")
-        return True
-    except smtplib.SMTPAuthenticationError as e:
-        print("❌ Error al enviar correo de bienvenida: credenciales SMTP incorrectas o acceso no autorizado. Revisa EMAIL_SENDER, EMAIL_PASSWORD y la configuración de Gmail.")
-        print(str(e))
+
+        # 1) Intentar enviar por SMTP si tenemos contraseña
+        if email_password:
+            try:
+                with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as servidor:
+                    servidor.starttls()
+                    servidor.login(email_sender, email_password)
+                    servidor.sendmail(email_sender, email_destinatario, mensaje.as_string())
+                print(f"✅ Correo enviado exitosamente a {email_destinatario} vía SMTP")
+                return True
+            except smtplib.SMTPAuthenticationError as e:
+                print("❌ Error al enviar correo de bienvenida: credenciales SMTP incorrectas o acceso no autorizado. Revisa EMAIL_SENDER, EMAIL_PASSWORD y la configuración de Gmail.")
+                print(str(e))
+            except Exception as e:
+                print(f"❌ Error al enviar correo vía SMTP: {e}")
+
+        # 2) Si falla o no hay contraseña, intentar SendGrid
+        if sendgrid_key:
+            sent = _send_with_sendgrid(email_destinatario, mensaje["Subject"], html, email_sender)
+            if sent:
+                print(f"✅ Correo enviado exitosamente a {email_destinatario} vía SendGrid")
+                return True
+            else:
+                print("❌ Falló el envío vía SendGrid.")
+
+        # 3) Registrar correo fallido en disco para reintento manual
+        failed_path = BASE_DIR / "failed_emails.log"
+        try:
+            with open(failed_path, "a", encoding="utf-8") as f:
+                f.write(f"{datetime.utcnow().isoformat()} | {email_destinatario} | subject: {mensaje['Subject']}\n{html}\n\n---\n")
+            print(f"⚠️ Correo no enviado. Guardado en {failed_path}")
+        except Exception as e:
+            print("❌ No se pudo guardar el correo fallido:", e)
+
         return False
     except Exception as e:
-        print(f"❌ Error al enviar correo: {str(e)}")
+        print(f"❌ Error inesperado al preparar correo: {e}")
+        return False
+
+def _send_with_sendgrid(to_email: str, subject: str, html: str, from_email: str) -> bool:
+    """Envía correo usando la API de SendGrid si `SENDGRID_API_KEY` está configurada."""
+    api_key = os.getenv("SENDGRID_API_KEY")
+    if not api_key:
+        return False
+    try:
+        import requests
+        payload = {
+            "personalizations": [{"to": [{"email": to_email}]}],
+            "from": {"email": from_email},
+            "subject": subject,
+            "content": [{"type": "text/html", "value": html}],
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        resp = requests.post("https://api.sendgrid.com/v3/mail/send", json=payload, headers=headers, timeout=10)
+        return resp.status_code in (200, 202)
+    except Exception as e:
+        print("❌ Error al enviar vía SendGrid:", e)
         return False
 
 
@@ -316,7 +396,11 @@ class State(rx.State):
     id_usuario: int = 0
     es_autentica: bool = False
     email_actual: str = ""
+    correo_usuario: str = ""
     rol_usuario: str = ""
+    # Campo para ingresar la SendGrid API key desde la UI (admin)
+    sendgrid_key_input: str = ""
+    sendgrid_saved_message: str = ""
     show_password: bool = False
     # Campos para cambiar contraseña
     current_password: str = ""
@@ -493,6 +577,24 @@ class State(rx.State):
         self.toast_visible = False
         self.toast_mensaje = ""
 
+    def guardar_sendgrid_api_key(self) -> bool:
+        """Guarda la SendGrid API Key desde `self.sendgrid_key_input` en `email_config.json`.
+        Puede ser llamada desde la UI de admin.
+        """
+        key = (self.sendgrid_key_input or "").strip()
+        if not key:
+            self.sendgrid_saved_message = "Clave vacía."
+            return False
+        try:
+            save_email_config({"SENDGRID_API_KEY": key, "EMAIL_SENDER": os.getenv("EMAIL_SENDER", "enlacepqrs1755@gmail.com")})
+            self.sendgrid_saved_message = "Clave guardada correctamente."
+            self.sendgrid_key_input = ""
+            return True
+        except Exception as e:
+            print("Error guardando SendGrid key:", e)
+            self.sendgrid_saved_message = "Error al guardar."
+            return False
+
     def toggle_menu_descarga(self):
         """Alterna la visibilidad del menú de descarga."""
         self.mostrar_menu_descarga = not self.mostrar_menu_descarga
@@ -593,21 +695,30 @@ class State(rx.State):
 
     @rx.var
     def compliance_percentage(self) -> int:
-        """Calcula un porcentaje simple de cumplimiento: solicitudes con 'cumple_plazo' truthy.
+        """Calcula cumplimiento: (solicitudes resueltas / total) * 100.
+        Resueltas = estado 'Respondida' o 'Cerrada'.
         """
         total = len(self.solicitudes or [])
         if total == 0:
+            print("DEBUG - compliance_percentage: total=0 (no solicitudes), returning 0")
             return 0
-        cumple = sum(1 for s in (self.solicitudes or []) if s.get('cumple_plazo'))
-        return int((cumple / total) * 100)
+        # Contar solicitudes resueltas (Respondida, Cerrada, etc.)
+        resolved_states = {"respondida", "cerrada", "finalizada"}
+        resueltas = sum(1 for s in (self.solicitudes or []) if (s.get('estado') or "").lower() in resolved_states)
+        pct = int((resueltas / total) * 100) if total > 0 else 0
+        print(f"DEBUG - compliance_percentage: total={total}, resueltas={resueltas}, pct={pct}%")
+        print(f"DEBUG - compliance_percentage: solicitudes estados={[(s.get('radicado'), s.get('estado')) for s in (self.solicitudes or [])[:5]]}")
+        return pct
 
     @rx.var
     def compliance_chart_data(self) -> list[dict]:
         pct = int(self.compliance_percentage)
-        return [
-            {"name": "Cumplimiento", "value": pct},
-            {"name": "Resto", "value": max(0, 100 - pct)},
+        data = [
+            {"name": "Cumplimiento", "value": pct, "fill": "#10b981"},
+            {"name": "Resto", "value": max(0, 100 - pct), "fill": "#e5e7eb"},
         ]
+        print(f"DEBUG - compliance_chart_data: pct={pct}, returning {data}")
+        return data
 
     # --- Semáforo: días hábiles y conteos por color ---
     def _parse_dt(self, v):
@@ -674,18 +785,8 @@ class State(rx.State):
                     return {"remaining": None, "fill": "gray"}
 
             start = dt.date() + timedelta(days=1)
-            ref = date.today()
-            if solicitud.get("fecha_respuesta"):
-                try:
-                    r = datetime.fromisoformat(str(solicitud.get("fecha_respuesta")))
-                    ref = r.date()
-                except Exception:
-                    try:
-                        from dateutil import parser as _p
-                        r = _p.parse(str(solicitud.get("fecha_respuesta")))
-                        ref = r.date()
-                    except Exception:
-                        pass
+            ref = date.today()  # SIEMPRE usar hoy, no fecha_respuesta
+
 
             # contar días hábiles (fines de semana excluidos). No usamos festivos aquí.
             days = 0
@@ -3556,6 +3657,40 @@ def funcionario_dashboard() -> rx.Component:
                         bg=rx.color_mode_cond(light="#f8fafc", dark="#111827"),
                         width="100%"
                     ),
+                    # SendGrid Admin Card (solo visible para funcionarios)
+                    rx.cond(
+                        State.rol_usuario == "funcionario",
+                        rx.box(
+                            rx.vstack(
+                                rx.heading("Configuración de correo (SendGrid)", size="5"),
+                                rx.text("Agrega la API Key de SendGrid para habilitar envío de correos desde la app."),
+                                rx.hstack(
+                                    rx.input(
+                                        placeholder="SendGrid API Key",
+                                        value=State.sendgrid_key_input,
+                                        on_change=State.set_sendgrid_key_input,
+                                        width="100%",
+                                    ),
+                                    rx.button("Guardar", on_click=State.guardar_sendgrid_api_key, color_scheme="green"),
+                                ),
+                                rx.text(
+                                    State.sendgrid_saved_message,
+                                    color=rx.cond(
+                                        State.sendgrid_saved_message == "Clave guardada correctamente.",
+                                        "green",
+                                        "red",
+                                    ),
+                                ),
+                                spacing="3",
+                            ),
+                            p="4",
+                            border="1px solid #cbd5e1",
+                            border_radius="md",
+                            bg=rx.color_mode_cond(light="#ffffff", dark="#0b1220"),
+                            width="100%",
+                            margin_bottom="1em",
+                        ),
+                    ),
                     # Barra de búsqueda y filtros
                     rx.box(
                         rx.vstack(
@@ -4612,14 +4747,86 @@ def reportes_page() -> rx.Component:
                                     spacing="3",
                                     align_items="center",
                                 ),
-                                rc.pie_chart(
-                                    rc.tooltip(),
-                                        rc.pie(data_key="value", name_key="name", inner_radius="60%", outer_radius="80%", fill="#10b981"),
-                                        data=State.compliance_chart_data,
-                                    width=320,
-                                    height=240,
+                                # Gráfica de cumplimiento con visualización alternativa (barra horizontal coloreada + dona)
+                                rx.vstack(
+                                    # Barra de cumplimiento visual (fallback más visible)
+                                    rx.vstack(
+                                        rx.text("Cumplimiento:", font_weight="semibold", font_size="sm", color="gray.600"),
+                                        rx.hstack(
+                                            rx.box(
+                                                bg="#10b981",
+                                                height="16px",
+                                                width=rx.cond(State.compliance_percentage > 0, f"{State.compliance_percentage}%", "0%"),
+                                                border_radius="2px",
+                                                transition="width 0.3s ease",
+                                            ),
+                                            rx.box(
+                                                bg="#e5e7eb",
+                                                height="16px",
+                                                width=rx.cond(State.compliance_percentage < 100, f"{100 - State.compliance_percentage}%", "0%"),
+                                                border_radius="2px",
+                                                transition="width 0.3s ease",
+                                            ),
+                                            border="1px solid #d1d5db",
+                                            border_radius="2px",
+                                            overflow="hidden",
+                                            width="100%",
+                                            spacing="0",
+                                        ),
+                                        spacing="2",
+                                        width="100%",
+                                    ),
+                                    rx.center(
+                                        rx.hstack(
+                                            rx.text(State.compliance_percentage, font_size="4xl", font_weight="bold", color="#10b981"),
+                                            rx.text("%", font_size="xl", font_weight="bold", color="#10b981"),
+                                        )
+                                    ),
+                                    # DEBUG: Mostrar datos
+                                    rx.box(
+                                        rx.cond(
+                                            State.compliance_chart_data,
+                                            rx.vstack(
+                                                rx.text("DEBUG Data:", color="red", font_weight="bold"),
+                                                rx.foreach(
+                                                    State.compliance_chart_data,
+                                                    lambda item: rx.text(
+                                                        f"{item['name']}: {item['value']} (color: {item['fill']})",
+                                                        font_size="sm",
+                                                        color="red"
+                                                    )
+                                                ),
+                                                width="100%",
+                                            ),
+                                            rx.text("Sin datos", color="red"),
+                                        ),
+                                        width="100%",
+                                    ),
+                                    # Gráfica de dona con leyenda y etiquetas
+                                    rx.center(
+                                        rc.pie_chart(
+                                            rc.tooltip(),
+                                            rc.legend(layout="horizontal", vertical_align="bottom", align="center"),
+                                            rc.pie(
+                                                rc.cell(fill="#10b981"),
+                                                rc.cell(fill="#ef4444"),
+                                                data=State.compliance_chart_data,
+                                                data_key="value",
+                                                name_key="name",
+                                                cx="50%",
+                                                cy="50%",
+                                                outer_radius=100,
+                                                inner_radius=40,
+                                                label=True,
+                                            ),
+                                            width=420,
+                                            height=300,
+                                        ),
+                                        width="100%"
+                                    ),
+                                    spacing="3",
+                                    width="100%",
                                 ),
-                                rx.center(rx.hstack(rx.text(State.compliance_percentage, font_size="3xl", font_weight="bold"), rx.text("%", font_size="lg", font_weight="bold"))),
                                 spacing="3",
                             ),
                             p="4",
@@ -4634,34 +4841,35 @@ def reportes_page() -> rx.Component:
                     rx.vstack(
                         rx.box(
                             rx.vstack(
-                                rx.hstack(rx.text("Solicitudes Totales", color="gray.600"), rx.spacer(), rx.text(State.numero_solicitudes, font_weight="bold")),
-                                rx.hstack(rx.text("Tiempo Promedio de Cierre", color="gray.600"), rx.spacer(), rx.text("10 min", font_weight="bold")),
-                                spacing="3",
+                                rx.hstack(rx.text("Solicitudes Totales", color="gray.600", font_size="sm"), rx.spacer(), rx.text(State.numero_solicitudes, font_weight="bold")),
+                                rx.hstack(rx.text("Tiempo Promedio de Cierre", color="gray.600", font_size="sm"), rx.spacer(), rx.text("10 min", font_weight="bold")),
+                                spacing="2",
                             ),
-                            p="4",
+                            p="3",
                             border="1px solid #e2e8f0",
                             border_radius="lg",
                             bg=rx.color_mode_cond(light="#ffffff", dark="#111827"),
-                            width="360px",
+                            width="100%",
                         ),
 
                         rx.box(
                             rx.vstack(
-                                rx.heading("Mejores Áreas", size="5"),
+                                rx.heading("Mejores Áreas", size="6"),
                                 rx.foreach(
                                     State.top_areas,
-                                    lambda row: rx.hstack(rx.text(row.get('name')), rx.spacer(), rx.text(row.get('total'), font_weight="bold")),
+                                    lambda row: rx.hstack(rx.text(row.get('name'), font_size="sm"), rx.spacer(), rx.text(row.get('total'), font_weight="bold", font_size="sm")),
                                 ),
-                                spacing="2",
+                                spacing="1",
                             ),
-                            p="4",
+                            p="3",
                             border="1px solid #e2e8f0",
                             border_radius="lg",
                             bg=rx.color_mode_cond(light="#ffffff", dark="#111827"),
-                            width="360px",
+                            width="100%",
                         ),
-                        spacing="4",
+                        spacing="3",
                         align_items="stretch",
+                        width="100%",
                     ),
                     spacing="8",
                     width="100%",
