@@ -313,6 +313,7 @@ class State(rx.State):
     email_actual: str = ""
     rol_usuario: str = ""
     show_password: bool = False
+    show_confirm_password: bool = False
     # Campos para cambiar contraseña
     current_password: str = ""
     new_password: str = ""
@@ -1154,7 +1155,7 @@ Sistema PQRS
         self.show_password = False
         # Login automático después del registro
         self.es_autentica = True
-        self.correo_usuario = self.correo
+        self.email_actual = self.correo
         self.rol_usuario = "ciudadano"
         self.cargar_usuarios()
 
@@ -1165,9 +1166,9 @@ Sistema PQRS
             return
         self._crear_usuario(
             rol="ciudadano",
-            exito_mensaje="Registro exitoso. Revisa tu correo para confirmar. Ahora el funcionario puede iniciar sesión.",
+            exito_mensaje="Registro exitoso. Revisa tu correo para confirmar.",
         )
-        # Redirigir a solicitudes después del registro
+        # Redirigir a nueva solicitud después del registro si no hay errores
         if not self.error_de_registro:
             return rx.redirect("/solicitudes")
 
@@ -1229,6 +1230,10 @@ Sistema PQRS
                 on_auto_close=State.redirect_after_login,
             )
 
+    def redirect_after_signup(self):
+        # Después del registro, ciudadano va al panel de nueva solicitud
+        return rx.redirect("/solicitudes")
+
     def redirect_after_login(self):
         if self.rol_usuario == "funcionario":
             return rx.redirect("/dashboard-funcionario")
@@ -1289,6 +1294,9 @@ Sistema PQRS
     def toggle_show_password(self):
         self.show_password = not self.show_password
 
+    def toggle_show_confirm_password(self):
+        self.show_confirm_password = not self.show_confirm_password
+
     def limpiar_formulario_solicitud(self, keep_message: bool = False):
         self.tipo_solicitud = ""
         self.persona_vulnerable = ""
@@ -1306,6 +1314,41 @@ Sistema PQRS
         self.acepta_politica_solicitud = False
         if not keep_message:
             self.solicitud_mensaje = ""
+
+    def limpiar_formulario_registro(self):
+        """Limpia todos los campos del formulario de registro."""
+        self.correo = ""
+        self.contraseña = ""
+        self.confirmar_contraseña = ""
+        self.tipo_identificacion = ""
+        self.numero_identificacion = ""
+        self.nombres = ""
+        self.apellidos = ""
+        self.sexo = ""
+        self.telefono = ""
+        self.departamento = ""
+        self.ciudad = ""
+        self.direccion = ""
+        self.etnia = ""
+        self.persona_vulnerable_registro = ""
+        self.acepta_notificaciones = False
+        self.acepta_politica_datos = False
+        # Limpiar validaciones
+        self.correo_validado = False
+        self.numero_identificacion_valid = False
+        self.nombres_valid = False
+        self.apellidos_valid = False
+        self.telefono_valid = False
+        self.departamento_valid = False
+        self.ciudad_valid = False
+        # Limpiar mensajes
+        self.error_de_registro = ""
+        self.succes = ""
+        self.correo_confirmacion_visible = False
+        self.correo_confirmacion_mensaje = ""
+        self.modal_politica_visible = False
+        self.show_password = False
+        self.show_confirm_password = False
 
     def crear_solicitud(self):
         self.solicitud_mensaje = ""
@@ -1627,14 +1670,25 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
     confirmar_field = (
         rx.vstack(
             label_requerido("Confirmar Contraseña"),
-            rx.input(
-                placeholder="Confirmar Contraseña",
-                type=rx.cond(State.show_password, "text", "password"),
-                value=State.confirmar_contraseña,
-                on_change=State.set_confirmar_contraseña,
-                border_radius="md",
-                size="3",
-                **input_style,
+            rx.hstack(
+                rx.input(
+                    placeholder="Confirmar Contraseña",
+                    type=rx.cond(State.show_confirm_password, "text", "password"),
+                    value=State.confirmar_contraseña,
+                    on_change=State.set_confirmar_contraseña,
+                    border_radius="md",
+                    width="95%",
+                    size="3",
+                    **input_style,
+                ),
+                rx.button(
+                    rx.cond(State.show_confirm_password, rx.icon("eye_off"), rx.icon("eye")),
+                    on_click=State.toggle_show_confirm_password,
+                    variant="ghost",
+                    size="3",
+                ),
+                width="100%",
+                spacing="2",
             ),
         )
         if show_confirm
@@ -1687,7 +1741,7 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                                 value=State.contraseña,
                                 on_change=State.set_contraseña,
                                 border_radius="10px",
-                                width="100%",
+                                width="95%",
                                 size="3",
                                 **input_style,
                             ),
@@ -1700,7 +1754,7 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                             width="100%",
                             spacing="2",
                         ),
-                        col_span="2",
+                        col_span="1",
                     ),
                     confirmar_field,
                     rx.vstack(
@@ -1985,7 +2039,24 @@ def auth_card(title: str, on_submit, show_confirm: bool = False) -> rx.Component
                     rx.box(),
                 ),
                 rx.vstack(
-                    rx.button(title, type="submit", color_scheme="blue", size="4", width={"base": "100%", "md": "220px"}),
+                    rx.hstack(
+                        rx.button(title, type="submit", color_scheme="blue", size="4", width={"base": "100%", "md": "220px"}),
+                        rx.cond(
+                            show_confirm,
+                            rx.button(
+                                "Limpiar",
+                                on_click=State.limpiar_formulario_registro,
+                                color_scheme="gray",
+                                size="4",
+                                width={"base": "100%", "md": "220px"},
+                                variant="outline"
+                            ),
+                            rx.box(display="none"),
+                        ),
+                        width="100%",
+                        spacing="3",
+                        flex_wrap="wrap",
+                    ),
                     rx.hstack(
                         rx.text(
                             "¿Ya tienes una cuenta?",
@@ -3278,9 +3349,9 @@ def funcionario_dashboard() -> rx.Component:
                                 align_items="stretch"
                             ),
                             p="6",
-                            border="1px solid #e2e8f0",
+                            border=rx.color_mode_cond(light="1px solid #e2e8f0", dark="1px solid gray.600"),
                             border_radius="lg",
-                            bg="white",
+                            bg=rx.color_mode_cond(light="white", dark="gray.800"),
                             width="100%",
                             max_width="600px",
                             position="fixed",
@@ -3295,7 +3366,7 @@ def funcionario_dashboard() -> rx.Component:
                         State.asignar_area_id,
                         rx.box(
                             rx.vstack(
-                                rx.heading("Asignar área responsable", size="6", color="black"),
+                                rx.heading("Asignar área responsable", size="6", color=rx.color_mode_cond(light="black", dark="white")),
                                 rx.form(
                                     rx.vstack(
                                         rx.text("Área responsable", font_weight="semibold", color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
@@ -3371,9 +3442,9 @@ def funcionario_dashboard() -> rx.Component:
                                 align_items="stretch"
                             ),
                             p="6",
-                            border="1px solid #e2e8f0",
+                            border=rx.color_mode_cond(light="1px solid #e2e8f0", dark="1px solid gray.600"),
                             border_radius="lg",
-                            bg="white",
+                            bg=rx.color_mode_cond(light="white", dark="gray.800"),
                             width="100%",
                             max_width="600px",
                             position="fixed",
