@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 import reflex as rx
-from .usuario_model import Usuario, Solicitud
+from .usuario_model import Usuario, Solicitud, EstadoCambio
 from sqlmodel import select, SQLModel, create_engine, text, Session
 from rxconfig import config
 import smtplib
@@ -434,6 +434,7 @@ class State(rx.State):
     # Campos para consultar estado de solicitud
     consulta_radicado: str = ""
     solicitud_consultada: dict[str, Any] = {}
+    historial_estado: list[dict[str, Any]] = []
     consulta_mensaje: str = ""
     # Enlace generado tras exportar reportes (archivo descargable)
     export_href: str = ""
@@ -611,6 +612,22 @@ class State(rx.State):
     @rx.var
     def numero_solicitudes_actualizadas(self) -> str:
         return str(sum(1 for solicitud in (self.solicitudes or []) if solicitud.get('estado') == 'Actualizada'))
+    
+    @rx.var
+    def numero_solicitudes_asignadas_area(self) -> str:
+        return str(sum(1 for solicitud in (self.solicitudes or []) if solicitud.get('estado') == 'Asignada a área'))
+    
+    @rx.var
+    def numero_solicitudes_en_gestion_area(self) -> str:
+        return str(sum(1 for solicitud in (self.solicitudes or []) if solicitud.get('estado') == 'En gestión de área'))
+    
+    @rx.var
+    def numero_solicitudes_solucionadas(self) -> str:
+        return str(sum(1 for solicitud in (self.solicitudes or []) if solicitud.get('estado') == 'Solucionada'))
+    
+    @rx.var
+    def numero_solicitudes_reabiertas(self) -> str:
+        return str(sum(1 for solicitud in (self.solicitudes or []) if solicitud.get('estado') == 'Reabierta'))
     
     @rx.var
     def numero_solicitudes_cerradas(self) -> str:
@@ -936,12 +953,22 @@ class State(rx.State):
         return str(len(self.documento_nombres or []))
 
     @rx.var
+    def documento_nombres_items(self) -> list[dict[str, Any]]:
+        return [
+            {"index": i, "name": nombre}
+            for i, nombre in enumerate(self.documento_nombres or [])
+        ]
+
+    @rx.var
     def documento_tamano_total(self) -> str:
         total = 0
         for item in self.documentos or []:
             if isinstance(item, dict):
                 total += int(item.get("size") or 0)
-        return f"{total / (1024 * 1024):.2f} MB"
+        used_mb = total / (1024 * 1024)
+        max_mb = 10.0
+        remaining_mb = max(0.0, max_mb - used_mb)
+        return f"{used_mb:.2f} / {max_mb:.2f} MB ({remaining_mb:.2f} MB disponibles)"
     
     @rx.var
     def usuarios_registrados_count(self) -> int:
@@ -1172,114 +1199,99 @@ class State(rx.State):
 
     def set_documento(self, documento: Any):
         """Actualiza los adjuntos cuando el ciudadano selecciona uno o varios archivos."""
-        self.documentos = []
-        self.documento_nombres = []
+        self.archivo_error_mensaje = ""
         self.documento = ""
         self.documento_nombre = ""
-        self.archivo_error_mensaje = ""
 
         allowed_ext = {"pdf", "png", "jpg", "jpeg"}
         max_files = 3
+        max_size_per_file = 10 * 1024 * 1024
         max_total_size = 10 * 1024 * 1024
 
         def file_key(item: Any) -> tuple[str, int]:
             if isinstance(item, dict):
                 name = item.get("name") or item.get("filename") or "adjunto"
                 size = int(item.get("size") or 0)
-        max_size = 10 * 1024 * 1024
-
-        def valid_document(item: Any) -> bool:
-            if isinstance(item, dict):
-                name = item.get("name") or item.get("filename") or "adjunto"
-                size = item.get("size") or 0
-            elif isinstance(item, str):
-                name = os.path.basename(item)
-                size = 0
-            else:
-                name = "adjunto"
-                size = 0
+                return (name, size)
+            if isinstance(item, str):
+                return (os.path.basename(item), 0)
+            name = getattr(item, "name", None) or getattr(item, "filename", None) or "adjunto"
+            size = int(getattr(item, "size", 0) or 0)
             return (name, size)
 
         def get_name(item: Any) -> str:
             if isinstance(item, dict):
                 return item.get("name") or item.get("filename") or "adjunto"
-            return os.path.basename(item) if isinstance(item, str) else "adjunto"
+            if isinstance(item, str):
+                return os.path.basename(item)
+            return getattr(item, "name", None) or getattr(item, "filename", None) or "adjunto"
 
         def get_size(item: Any) -> int:
             if isinstance(item, dict):
                 return int(item.get("size") or 0)
-            return 0
+            if isinstance(item, str):
+                return 0
+            return int(getattr(item, "size", 0) or 0)
 
-        def valid_document(item: Any) -> bool:
+        def get_extension(item: Any) -> str:
+            return os.path.splitext(get_name(item))[1].lower().lstrip(".")
+
+        def normalize_file_item(item: Any) -> dict[str, Any]:
             name = get_name(item)
             size = get_size(item)
-
-            return True
-
-            ext = os.path.splitext(name)[1].lower().lstrip(".")
-            if ext not in allowed_ext:
-                self.archivo_error_mensaje = "Solo se aceptan archivos PDF, PNG o JPG."
-                return False
-            if size > max_total_size:
-             if size and size > max_size:
-                self.archivo_error_mensaje = "Cada archivo no puede superar los 10MB."
-                return False
-            return True
-
-        def append_document(item: Any):
-            name = get_name(item)
             if isinstance(item, dict):
-                self.documento_nombres.append(name)
-                self.documentos.append(item)
-            elif isinstance(item, str):
-                self.documento_nombres.append(name)
-            if isinstance(item, dict):
-                name = item.get("name") or item.get("filename") or "adjunto"
-                self.documento_nombres.append(name)
-                self.documentos.append(item)
-            elif isinstance(item, str):
-                self.documento_nombres.append(os.path.basename(item))
-                self.documentos.append(item)
-            else:
-                self.documentos.append(item)
+                normalized = dict(item)
+                normalized["name"] = name
+                normalized["size"] = size
+                return normalized
+            if isinstance(item, str):
+                return {"name": name, "size": size}
+            normalized = {"name": name, "size": size}
+            try:
+                for attr in ("content", "type", "lastModified"):
+                    if hasattr(item, attr):
+                        normalized[attr] = getattr(item, attr)
+            except Exception:
+                pass
+            return normalized
+
+        if documento is None:
+            return
 
         archivos = documento if isinstance(documento, list) else [documento]
         nuevos_archivos: list[Any] = []
         existentes = {file_key(item) for item in self.documentos}
+        current_total_size = sum(get_size(item) for item in self.documentos)
 
         for item in archivos:
             llave = file_key(item)
             if llave in existentes:
                 continue
+
+            nombre = get_name(item)
+            ext = get_extension(item)
+            tamano = get_size(item)
+
+            if ext not in allowed_ext:
+                self.archivo_error_mensaje = "Solo se aceptan archivos PDF, PNG o JPG."
+                return
+            if tamano > max_size_per_file:
+                self.archivo_error_mensaje = "Cada archivo no puede superar los 10MB."
+                return
+            if len(self.documentos) + len(nuevos_archivos) + 1 > max_files:
+                self.archivo_error_mensaje = "Solo puedes adjuntar hasta 3 archivos."
+                return
+            if current_total_size + tamano > max_total_size:
+                self.archivo_error_mensaje = "La suma de los archivos no puede superar los 10MB."
+                return
+
             nuevos_archivos.append(item)
             existentes.add(llave)
-
-        total_files = len(self.documentos) + len(nuevos_archivos)
-        if total_files > max_files:
-            self.archivo_error_mensaje = "Solo puedes adjuntar hasta 3 archivos."
-            return
-
-        current_total_size = sum(get_size(item) for item in self.documentos)
-        added_total_size = sum(get_size(item) for item in nuevos_archivos)
-        if current_total_size + added_total_size > max_total_size:
-            self.archivo_error_mensaje = "La suma de los archivos no puede superar los 10MB."
-            return
+            current_total_size += tamano
 
         for item in nuevos_archivos:
-            if not valid_document(item):
-                self.documentos = []
-                self.documento_nombres = []
-                return
-        if len(archivos) > max_files:
-            self.archivo_error_mensaje = "Solo puedes adjuntar hasta 3 archivos."
-            return
-
-        for item in archivos:
-            if not valid_document(item):
-                self.documentos = []
-                self.documento_nombres = []
-                return
-            append_document(item)
+            self.documentos.append(normalize_file_item(item))
+            self.documento_nombres.append(get_name(item))
 
         if self.documento_nombres:
             self.documento_nombre = ", ".join(self.documento_nombres)
@@ -1292,6 +1304,8 @@ class State(rx.State):
 
     def eliminar_documento(self, index: int):
         # Reconstruir listas para evitar comportamiento reactivo inesperado
+        if index is None or not isinstance(index, int):
+            return
         if not (0 <= index < len(self.documentos)):
             return
         nuevos_docs: list[Any] = []
@@ -1428,6 +1442,7 @@ class State(rx.State):
                     self.mensaje_actualizar_estado = "Solicitud no encontrada."
                     return
                 
+                estado_anterior = solicitud_obj.estado
                 solicitud_obj.estado = self.nuevo_estado
                 if self.respuesta_solicitud:
                     solicitud_obj.respuesta = self.respuesta_solicitud
@@ -1436,6 +1451,16 @@ class State(rx.State):
                 if documento_respuesta_guardado:
                     # Si la solicitud no tiene campo para respuesta_documento, lo agregamos como metadato en respuesta
                     solicitud_obj.respuesta = (solicitud_obj.respuesta or "") + f"\n\n[DOCUMENTO ADJUNTO: {os.path.basename(documento_respuesta_guardado)}]"
+
+                if estado_anterior != solicitud_obj.estado or self.respuesta_solicitud:
+                    session.add(
+                        EstadoCambio(
+                            solicitud_id=solicitud_obj.id,
+                            estado=solicitud_obj.estado,
+                            fecha_cambio=datetime.now(),
+                            observacion=self.respuesta_solicitud or f"Cambio de estado a {self.nuevo_estado}"
+                        )
+                    )
                 
                 session.add(solicitud_obj)
                 session.commit()
@@ -1546,7 +1571,16 @@ Sistema PQRS
                     return
                 
                 solicitud_obj.area_responsable = area_a_asignar
+                solicitud_obj.estado = "Asignada a área"
                 session.add(solicitud_obj)
+                session.add(
+                    EstadoCambio(
+                        solicitud_id=solicitud_obj.id,
+                        estado=solicitud_obj.estado,
+                        fecha_cambio=datetime.now(),
+                        observacion=f"Asignado a área {area_a_asignar}"
+                    )
+                )
                 session.commit()
             
             # Enviar notificación por correo al ciudadano
@@ -1632,7 +1666,7 @@ Sistema PQRS
         documento_basename = documento_adjuntos[0]["basename"] if documento_adjuntos else ""
         documento_href = documento_adjuntos[0]["href"] if documento_adjuntos else ""
 
-        return {
+        result = {
             "id": solicitud.id,
             "radicado": solicitud.radicado,
             "tipo_solicitud": solicitud.tipo_solicitud,
@@ -1652,11 +1686,9 @@ Sistema PQRS
             "respuesta_documento_href": f"/assets/uploads/{quote(respuesta_documento_basename)}" if respuesta_documento_basename else "",
             "fecha": solicitud.fecha.strftime("%Y-%m-%d %H:%M") if isinstance(solicitud.fecha, datetime) else str(solicitud.fecha),
             "creado_por": solicitud.creado_por,
-           "usuario_id": solicitud.usuario_id,
-        
-        
+            "usuario_id": solicitud.usuario_id,
+            "historial_estado": self._obtener_historial_estado(solicitud.id),
         }
-        
 
         # Extraer metadata embebida en `documento` si existe (usado para pruebas/seed)
         try:
@@ -1673,8 +1705,26 @@ Sistema PQRS
             pass
 
         return result
-        
-        
+
+    def _obtener_historial_estado(self, solicitud_id: int) -> list[dict[str, Any]]:
+        try:
+            with Session(engine) as session:
+                cambios = session.exec(
+                    select(EstadoCambio)
+                    .where(EstadoCambio.solicitud_id == solicitud_id)
+                    .order_by(EstadoCambio.fecha_cambio.asc())
+                ).all()
+
+            return [
+                {
+                    "estado": cambio.estado,
+                    "fecha_cambio": cambio.fecha_cambio.strftime("%Y-%m-%d %H:%M") if isinstance(cambio.fecha_cambio, datetime) else str(cambio.fecha_cambio),
+                    "observacion": cambio.observacion or "",
+                }
+                for cambio in cambios
+            ]
+        except Exception:
+            return []
 
     @rx.var
     def solicitud_consultada_adjuntos(self) -> list[dict[str, str]]:
@@ -2163,6 +2213,15 @@ Sistema PQRS
                 )
                 session.add(solicitud_obj)
                 session.commit()
+                session.add(
+                    EstadoCambio(
+                        solicitud_id=solicitud_obj.id,
+                        estado=solicitud_obj.estado,
+                        fecha_cambio=solicitud_obj.fecha,
+                        observacion="Solicitud creada"
+                    )
+                )
+                session.commit()
                 radicado_generado = solicitud_obj.radicado
             self.solicitud_mensaje = f"✅ Solicitud enviada con éxito. Radicado: {radicado_generado}"
             self.limpiar_formulario_solicitud(keep_message=True)
@@ -2194,6 +2253,7 @@ Sistema PQRS
         """Consulta el estado de una solicitud por número de radicado."""
         self.consulta_mensaje = ""
         self.solicitud_consultada = {}
+        self.historial_estado = []
         
         if not self.consulta_radicado:
             self.consulta_mensaje = "Ingresa un número de radicado válido."
@@ -2210,6 +2270,7 @@ Sistema PQRS
                     return
                 
                 self.solicitud_consultada = self._solicitud_a_dict(solicitud)
+                self.historial_estado = self._obtener_historial_estado(solicitud.id)
                 self.consulta_mensaje = "Solicitud encontrada."
                 
         except Exception as e:
@@ -3605,13 +3666,46 @@ def funcionario_dashboard() -> rx.Component:
                         ),
                         rx.box(
                             rx.vstack(
-                                rx.text("Actualizadas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
-                                rx.heading(State.numero_solicitudes_actualizadas, size="3", color=rx.color_mode_cond(light="black", dark="white"))
+                                rx.text("Asignadas a área", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes_asignadas_area, size="3", color=rx.color_mode_cond(light="black", dark="white"))
                             ),
                             p="4",
                             border=f"1px solid {rx.color_mode_cond(light='#e2e8f0', dark='#334155')}",
                             border_radius="xl",
-                            bg=rx.color_mode_cond(light="#f0fdf4", dark="#1e293b"),
+                            bg=rx.color_mode_cond(light="#f5f3ff", dark="#1f2937"),
+                            min_width="140px"
+                        ),
+                        rx.box(
+                            rx.vstack(
+                                rx.text("En gestión de área", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes_en_gestion_area, size="3", color=rx.color_mode_cond(light="black", dark="white"))
+                            ),
+                            p="4",
+                            border=f"1px solid {rx.color_mode_cond(light='#e2e8f0', dark='#334155')}",
+                            border_radius="xl",
+                            bg=rx.color_mode_cond(light="#eff6ff", dark="#1f2937"),
+                            min_width="140px"
+                        ),
+                        rx.box(
+                            rx.vstack(
+                                rx.text("Solucionadas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes_solucionadas, size="3", color=rx.color_mode_cond(light="black", dark="white"))
+                            ),
+                            p="4",
+                            border=f"1px solid {rx.color_mode_cond(light='#e2e8f0', dark='#334155')}",
+                            border_radius="xl",
+                            bg=rx.color_mode_cond(light="#ecfdf5", dark="#1f2937"),
+                            min_width="140px"
+                        ),
+                        rx.box(
+                            rx.vstack(
+                                rx.text("Reabiertas", font_weight="semibold", color=rx.color_mode_cond(light="gray.600", dark="gray.300"), font_size="sm"),
+                                rx.heading(State.numero_solicitudes_reabiertas, size="3", color=rx.color_mode_cond(light="black", dark="white"))
+                            ),
+                            p="4",
+                            border=f"1px solid {rx.color_mode_cond(light='#e2e8f0', dark='#334155')}",
+                            border_radius="xl",
+                            bg=rx.color_mode_cond(light="#fef9c3", dark="#1f2937"),
                             min_width="140px"
                         ),
                         rx.box(
@@ -3625,9 +3719,9 @@ def funcionario_dashboard() -> rx.Component:
                             bg=rx.color_mode_cond(light="#eef2ff", dark="#1e293b"),
                             min_width="140px"
                         ),
+                        flex_wrap="wrap",
                         spacing="4",
-                        width="100%",
-                        flex_wrap="wrap"
+                        width="100%"
                     ),
                     rx.box(
                         rx.vstack(
@@ -3725,7 +3819,7 @@ def funcionario_dashboard() -> rx.Component:
                                 rx.vstack(
                                     rx.text("Filtrar por Estado", font_weight="semibold", color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
                                     rx.select(
-                                        ["Todas", "Radicada", "Actualizada", "Cerrada"],
+                                        ["Todas", "Radicada", "Asignada a área", "En gestión de área", "Solucionada", "Reabierta", "Actualizada", "Cerrada"],
                                         value=State.filter_estado_solicitud,
                                         on_change=State.set_filter_estado_solicitud,
                                         width="100%",
@@ -3800,7 +3894,22 @@ def funcionario_dashboard() -> rx.Component:
                                                         color_scheme=rx.cond(
                                                             solicitud['estado'] == 'Radicada', 
                                                             "orange",
-                                                            rx.cond(solicitud['estado'] == 'Actualizada', "blue", "green")
+                                                            rx.cond(
+                                                                solicitud['estado'] == 'Asignada a área', "purple",
+                                                                rx.cond(
+                                                                    solicitud['estado'] == 'En gestión de área', "blue",
+                                                                    rx.cond(
+                                                                        solicitud['estado'] == 'Solucionada', "green",
+                                                                        rx.cond(
+                                                                            solicitud['estado'] == 'Reabierta', "yellow",
+                                                                            rx.cond(
+                                                                                solicitud['estado'] == 'Actualizada', "cyan",
+                                                                                rx.cond(solicitud['estado'] == 'Cerrada', "gray", "gray")
+                                                                            )
+                                                                        )
+                                                                    )
+                                                                )
+                                                            )
                                                         )
                                                     ),
                                                     width="100%",
@@ -3890,7 +3999,7 @@ def funcionario_dashboard() -> rx.Component:
                                         rx.vstack(
                                             rx.text("Nuevo Estado", font_weight="semibold", color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
                                             rx.select(
-                                                ["Radicada", "Actualizada", "Cerrada"],
+                                                ["Radicada", "Asignada a área", "En gestión de área", "Solucionada", "Reabierta", "Actualizada", "Cerrada"],
                                                 value=State.nuevo_estado,
                                                 on_change=State.set_nuevo_estado,
                                                 required=True,
@@ -4234,7 +4343,7 @@ def solicitudes_page() -> rx.Component:
                                                     color=rx.color_mode_cond(light="gray.600", dark="gray.400"),
                                                     no_wrap=False,
                                                 ),
-                                                rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB cada uno)", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
+                                                rx.text("Arrastra y suelta hasta 3 archivos PDF, PNG o JPG (máx 10MB cada uno, 10MB totales)", color=rx.color_mode_cond(light="gray.600", dark="gray.400")),
                                             ),
                                             rx.spacer(),
                                             rx.cond(
@@ -4243,7 +4352,7 @@ def solicitudes_page() -> rx.Component:
                                                 rx.text("Ningún archivo seleccionado", font_size="sm", color=rx.color_mode_cond(light="gray.500", dark="gray.400")),
                                             ),
                                         ),
-                                        rx.input(type="file", accept="application/pdf,image/png,image/jpeg", multiple=True, on_change=State.set_documento, style={"position": "absolute", "inset": "0", "width": "100%", "height": "100%", "opacity": 0, "cursor": "pointer"}),
+                                        rx.input(type="file", accept=".pdf,.png,.jpg,.jpeg", multiple=True, on_change=State.set_documento, style={"position": "absolute", "inset": "0", "width": "100%", "height": "100%", "opacity": 0, "cursor": "pointer"}),
                                         position="relative",
                                         padding="4",
                                         border="2px dashed #cfe7ff",
@@ -4258,11 +4367,11 @@ def solicitudes_page() -> rx.Component:
                                             rx.text("Archivos seleccionados:", font_size="sm", font_weight="semibold", color=rx.color_mode_cond(light="gray.700", dark="gray.300")),
                                             rx.vstack(
                                                 rx.foreach(
-                                                    State.documento_nombres,
-                                                    lambda nombre: rx.hstack(
-                                                        rx.text(nombre, font_size="sm", no_wrap=False),
+                                                    State.documento_nombres_items,
+                                                    lambda item: rx.hstack(
+                                                        rx.text(item["name"], font_size="sm", no_wrap=False),
                                                         rx.spacer(),
-                                                        rx.button("Eliminar", size="2", color_scheme="red", on_click=lambda nombre=nombre: State.eliminar_documento_por_nombre(nombre))
+                                                        rx.button("Eliminar", size="2", color_scheme="red", on_click=lambda *_args, item=item: State.eliminar_documento(item["index"]))
                                                     )
                                                 ),
                                                 spacing="2",
@@ -4379,14 +4488,30 @@ def consultar_estado_page() -> rx.Component:
                                             State.solicitud_consultada.get("estado", ""),
                                             color_scheme=rx.cond(
                                                 State.solicitud_consultada.get("estado") == "Radicada",
-                                                "blue",
+                                                "orange",
                                                 rx.cond(
-                                                    State.solicitud_consultada.get("estado") == "Actualizada",
-                                                    "yellow",
+                                                    State.solicitud_consultada.get("estado") == "Asignada a área",
+                                                    "purple",
                                                     rx.cond(
-                                                        State.solicitud_consultada.get("estado") == "Cerrada",
-                                                        "green",
-                                                        "gray"
+                                                        State.solicitud_consultada.get("estado") == "En gestión de área",
+                                                        "blue",
+                                                        rx.cond(
+                                                            State.solicitud_consultada.get("estado") == "Solucionada",
+                                                            "green",
+                                                            rx.cond(
+                                                                State.solicitud_consultada.get("estado") == "Reabierta",
+                                                                "yellow",
+                                                                rx.cond(
+                                                                    State.solicitud_consultada.get("estado") == "Actualizada",
+                                                                    "cyan",
+                                                                    rx.cond(
+                                                                        State.solicitud_consultada.get("estado") == "Cerrada",
+                                                                        "gray",
+                                                                        "gray"
+                                                                    )
+                                                                )
+                                                            )
+                                                        )
                                                     )
                                                 )
                                             )
@@ -4479,6 +4604,35 @@ def consultar_estado_page() -> rx.Component:
                                             rx.text("Documento no disponible", color="gray.500", font_size="sm")
                                         ),
                                         spacing="2"
+                                    )
+                                ),
+                                rx.cond(
+                                    State.historial_estado,
+                                    rx.vstack(
+                                        rx.text("Historial de estados:", font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white"), font_size="sm"),
+                                        rx.foreach(
+                                            State.historial_estado,
+                                            lambda cambio: rx.box(
+                                                rx.vstack(
+                                                    rx.hstack(
+                                                        rx.text(cambio["estado"], font_weight="semibold", color=rx.color_mode_cond(light="black", dark="white")),
+                                                        rx.spacer(),
+                                                        rx.text(cambio["fecha_cambio"], font_size="xs", color=rx.color_mode_cond(light="gray.600", dark="gray.400"))
+                                                    ),
+                                                    rx.cond(
+                                                        cambio.get("observacion"),
+                                                        rx.text(cambio.get("observacion", ""), font_size="sm", color=rx.color_mode_cond(light="gray.700", dark="gray.300"))
+                                                    )
+                                                ),
+                                                p="3",
+                                                border=f"1px solid {rx.color_mode_cond(light='#e2e8f0', dark='#4a5568')}",
+                                                border_radius="md",
+                                                bg=rx.color_mode_cond(light="#f7fafc", dark="#2d3748"),
+                                                width="100%",
+                                                margin_bottom="2"
+                                            )
+                                        ),
+                                        spacing="3"
                                     )
                                 ),
                                 

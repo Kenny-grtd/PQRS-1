@@ -41,4 +41,12 @@ class Solicitud(rx.Model, table=True):
     fecha: datetime = Field(default_factory=datetime.now)
     creado_por: Optional[str] = None
     usuario_id: Optional[int] = Field(default=None, foreign_key="usuario.id")
+
+class EstadoCambio(rx.Model, table=True):
+    """Historial de cambios de estado para cada solicitud."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    solicitud_id: int = Field(foreign_key="solicitud.id")
+    estado: str
+    fecha_cambio: datetime = Field(default_factory=datetime.now)
+    observacion: Optional[str] = None
     
