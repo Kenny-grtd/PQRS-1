@@ -1,2 +1,5 @@
-
 reflex==0.8.28.post1
+fastapi==0.136.3
+uvicorn==0.47.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2

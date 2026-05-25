@@ -1,0 +1,76 @@
+⚠️ ACCIÓN URGENTE: Tu correo NO está configurado correctamente
+
+ERROR RECIBIDO:
+(535, b'5.7.8 Username and Password not accepted...')
+
+CAUSA:
+Gmail no acepta tu contraseña normal. NECESITAS una App Password de 16 caracteres.
+
+===================================================================================
+PASOS PARA CONFIGURAR (máximo 5 minutos):
+===================================================================================
+
+1️⃣ HABILITAR 2FA EN GMAIL (solo si no lo has hecho)
+   • Ve a: https://myaccount.google.com/security
+   • Busca "Verificación en dos pasos" (2-Step Verification)
+   • Habilítalo si no está habilitado
+
+2️⃣ GENERAR APP PASSWORD
+   • Ve a: https://myaccount.google.com/apppasswords
+   • Selecciona: Mail y Windows Computer
+   • Google te dará una contraseña como: "abcd efgh ijkl mnop" (16 caracteres con espacios)
+   • COPIA SIN ESPACIOS: abcdefghijklmnop
+
+3️⃣ CREAR/EDITAR ARCHIVO .env
+   • En carpeta PQRS-1, crea archivo ".env" (si no existe)
+   • Añade estas líneas:
+   
+   EMAIL_SENDER=kenny.david20valencia@gmail.com
+   EMAIL_PASSWORD=abcdefghijklmnop
+   SMTP_SERVER=smtp.gmail.com
+   SMTP_PORT=587
+   EMPRESA_NOMBRE=Sistema PQRS
+   
+   ⚠️ REEMPLAZA "abcdefghijklmnop" con tu App Password real (16 caracteres, SIN ESPACIOS)
+
+4️⃣ VERIFICAR CONFIGURACIÓN
+   • Abre terminal en PQRS-1
+   • Ejecuta: python test_email_config.py
+   • Debería mostrar "✅ TODAS LAS PRUEBAS PASARON"
+
+5️⃣ REINICIAR APP
+   • Ejecuta: reflex run
+   • Prueba registrando un usuario nuevo
+   • Deberías recibir correo de bienvenida
+
+===================================================================================
+PUNTOS CRÍTICOS:
+===================================================================================
+
+❌ NO FUNCIONA: usar tu contraseña normal de Gmail
+✅ SÍ FUNCIONA: usar App Password de 16 caracteres
+
+❌ NO FUNCIONA: contraseña con espacios en .env
+✅ SÍ FUNCIONA: sin espacios (abcdefghijklmnop)
+
+❌ NO FUNCIONA: 2FA deshabilitado
+✅ SÍ FUNCIONA: 2FA habilitado primero
+
+===================================================================================
+¿TODAVÍA NO FUNCIONA?
+===================================================================================
+
+1. Ejecuta: python test_email_config.py
+   - Verifica que muestre tu correo, contraseña de 16 caracteres, etc.
+   - Lee el mensaje de error específico
+
+2. Lee CONFIGURAR_EMAIL.md (está en la carpeta PQRS-1)
+   - Tiene solución de problemas más detallada
+
+3. Puntos a revisar:
+   - ¿2FA está habilitado? (https://myaccount.google.com/security)
+   - ¿App Password es de 16 caracteres? (sin espacios en .env)
+   - ¿EMAIL_SENDER es exacto? (igual a tu correo de Gmail)
+   - ¿Hay firewall/VPN bloqueando puerto 587?
+
+===================================================================================
