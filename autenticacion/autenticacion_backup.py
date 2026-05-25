@@ -5,16 +5,13 @@ from datetime import datetime
 import bcrypt
 import base64
 import uuid
-<<<<<<< HEAD
 import reflex as rx
 from .usuario_model import Usuario
 from sqlmodel import select
-=======
 import os
 import reflex as rx
 from .usuario_model import Usuario, Solicitud
 from sqlmodel import select, SQLModel, create_engine
->>>>>>> e2b305b84823c9d11bb994642ecae2240d4e6dcb
 from rxconfig import config
 import os
 import smtplib
@@ -22,13 +19,11 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 # Carpeta donde se guardarán los archivos subidos por los usuarios
-<<<<<<< HEAD
 UPLOAD_DIR = os.path.join(os.getcwd(), "uploads")
 from typing import List, Dict
 
 # Cargar variables de entorno
 load_dotenv()
-=======
 UPLOAD_DIR = os.path.join(os.getcwd(), "assets", "uploads")
 from typing import List, Dict, Any
 
@@ -37,7 +32,6 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///reflex.db")
 engine = create_engine(DATABASE_URL, echo=False)
 SQLModel.metadata.create_all(engine)
->>>>>>> e2b305b84823c9d11bb994642ecae2240d4e6dcb
 
 def tiene_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -98,11 +92,7 @@ def enviar_correo_bienvenida(email_destinatario: str, email_usuario: str):
                     <p style="text-align: center; margin: 20px 0;">
                         <a href="http://localhost:3000/login" style="background-color: #1e40af; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">Ir a Iniciar Sesión</a>
                     </p>
-<<<<<<< HEAD
-                
-=======
-                    
->>>>>>> e2b305b84823c9d11bb994642ecae2240d4e6dcb
+
                     <hr style="border: 1px solid #ddd; margin: 20px 0;">
                     <p style="color: #666; font-size: 14px;"><strong>Recuerda:</strong> Nunca compartas tu contraseña con terceros. El equipo de soporte nunca te pedirá tu contraseña.</p>
                     <p style="color: #666; font-size: 14px;">Si tienes preguntas o problemas, contacta a nuestro equipo de soporte.</p>
@@ -178,12 +168,9 @@ class State(rx.State):
     
     id_usuario: int = 0
     es_autentica: bool = False
-<<<<<<< HEAD
-=======
     email_actual: str = ""
     rol_usuario: str = ""
     email_actual: str = ""
->>>>>>> e2b305b84823c9d11bb994642ecae2240d4e6dcb
     show_password: bool = False
     # Campos para cambiar contraseña
     current_password: str = ""
@@ -235,11 +222,8 @@ class State(rx.State):
         elif campo == "ciudad":
             self.ciudad_valid = ok
         return ok
-<<<<<<< HEAD
         
-=======
         return ok
->>>>>>> e2b305b84823c9d11bb994642ecae2240d4e6dcb
 
     def validar_correo_accion(self):
         """Acción invocada por el botón 'Validar' junto al correo."""
