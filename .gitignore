@@ -1,6 +1,14 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Archivos de Reflex
 assets/external/
 .states
 .web
+
+# Bases de datos y archivos temporales
 *.db
 *.py[cod]
 __pycache__/
