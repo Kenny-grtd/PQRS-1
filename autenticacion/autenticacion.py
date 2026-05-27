@@ -3027,6 +3027,10 @@ def _utility_bar() -> rx.Component:
         padding_y="8px",
         width="100%",
     )
+
+
+def utility_bar() -> rx.Component:
+    return _utility_bar()
  
  
 def _hero() -> rx.Component:
@@ -3392,169 +3396,316 @@ def _footer() -> rx.Component:
 # ── Página principal ──────────────────────────────────────────────────────────
  
 def index() -> rx.Component:
+    hero_text = rx.color_mode_cond(light="rgba(15, 23, 42, 0.96)", dark="white")
+    hero_sub = rx.color_mode_cond(light="rgba(15, 23, 42, 0.72)", dark="rgba(255,255,255,0.75)")
+    card_bg = rx.color_mode_cond(light="white", dark="#111827")
+    section_bg = rx.color_mode_cond(light="#f8fafc", dark="#020617")
+    body_bg = rx.color_mode_cond(light="#f1f5f9", dark="#020617")
+
     return rx.box(
-        _utility_bar(),
+        rx.color_mode.button(position="top-right"),
+        utility_bar(),
         navbar(),
- 
-        # ── HERO ─────────────────────────────────────────────────────────
-        _hero(),
- 
-        # ── BARRA DE STATS ────────────────────────────────────────────────
-        _stats_bar(),
- 
-        # ── ACCIONES RÁPIDAS ─────────────────────────────────────────────
-        rx.box(
-            rx.container(
-                rx.vstack(
-                    rx.vstack(
-                        rx.text("¿Qué deseas hacer hoy?",
-                                font_size="26px", font_weight="800",
-                                color=TEXT_MAIN, letter_spacing="-0.02em"),
-                        rx.text(
-                            "Accede rápidamente a los servicios principales del sistema.",
-                            font_size="14px", color=TEXT_SUB,
-                        ),
-                        spacing="2", align_items="center",
-                    ),
-                    rx.hstack(
-                        _quick_action(
-                            "file-plus", "Radicar PQRS",
-                            "Crea una nueva petición, queja, reclamo o sugerencia de forma sencilla.",
-                            "Ir al formulario", "/solicitudes",
-                            ORANGE, _ldc("#fff7ed","#2d1e00"),
-                        ),
-                        _quick_action(
-                            "search", "Consultar Estado",
-                            "Revisa el avance y respuesta de tus solicitudes en tiempo real.",
-                            "Consultar ahora", "/consultar-estado",
-                            TEAL, _ldc("#f0fdfe","#001f2d"),
-                        ),
-                        _quick_action(
-                            "user-plus", "Registro Ciudadano",
-                            "Crea tu cuenta para gestionar tus trámites de forma segura.",
-                            "Registrarme", "/registro",
-                            GREEN, _ldc("#f0fdf4","#002818"),
-                        ),
-                        _quick_action(
-                            "log-in", "Iniciar Sesión",
-                            "Accede a tu cuenta y continúa gestionando tus solicitudes.",
-                            "Entrar", "/login",
-                            NAVY_MID, _ldc("#eff6ff","#0f2744"),
-                        ),
-                        spacing="4",
-                        justify="center",
-                        flex_wrap="wrap",
-                        width="100%",
-                    ),
-                    spacing="8", align_items="center",
-                ),
-                max_width="1280px",
-                padding_x={"base":"20px","md":"40px"},
-                padding_y="64px",
-            ),
-            bg=PAGE_BG, width="100%",
-        ),
- 
-        # ── QUÉ ES PQRS ──────────────────────────────────────────────────
-        rx.box(
-            rx.container(
-                rx.vstack(
-                    rx.vstack(
-                        rx.text("¿Qué significa PQRS?",
-                                font_size="26px", font_weight="800",
-                                color=TEXT_MAIN, letter_spacing="-0.02em"),
-                        rx.text(
-                            "Conoce los cuatro tipos de solicitudes que puedes radicar.",
-                            font_size="14px", color=TEXT_SUB,
-                        ),
-                        spacing="2", align_items="center",
-                    ),
-                    rx.grid(
-                        _pqrs_badge("P", "Petición",
-                            "Solicitud respetuosa de información o actuación por parte de la entidad.",
-                            NAVY_MID, _ldc("#eff6ff","#0f2744")),
-                        _pqrs_badge("Q", "Queja",
-                            "Manifestación de inconformidad por la conducta o atención recibida.",
-                            AMBER, _ldc("#fffbeb","#2d1e00")),
-                        _pqrs_badge("R", "Reclamo",
-                            "Expresión de inconformidad por una prestación deficiente o incumplimiento.",
-                            RED_PQ, _ldc("#fef2f2","#2d0000")),
-                        _pqrs_badge("S", "Sugerencia",
-                            "Propuesta o recomendación para mejorar la atención o el servicio.",
-                            GREEN, _ldc("#f0fdf4","#002818")),
-                        columns="4",
-                        gap="4",
-                        width="100%",
-                        style={"gridTemplateColumns": "repeat(auto-fit, minmax(230px, 1fr))"},
-                    ),
-                    spacing="8", align_items="center",
-                ),
-                max_width="1280px",
-                padding_x={"base":"20px","md":"40px"},
-                padding_y="64px",
-            ),
-            bg=SECT_BG, width="100%",
-        ),
- 
-        # ── POR QUÉ USAR ESTE SISTEMA ─────────────────────────────────────
         rx.box(
             rx.container(
                 rx.hstack(
                     rx.vstack(
-                        rx.text("Atención clara y transparente\npara la ciudadanía",
-                                font_size="26px", font_weight="800",
-                                color=TEXT_MAIN, letter_spacing="-0.02em",
-                                line_height="1.25", white_space="pre-line"),
+                        rx.text("Plataforma oficial de atención ciudadana", color="white", font_size="sm", bg="#2563eb", padding_x="3", padding_y="2", border_radius="full", mb="4"),
+                        rx.heading("Atención PQRS - Enlace 1755", size="8", color="white", line_height="1.1"),
                         rx.text(
-                            "Este portal facilita la recepción, gestión y seguimiento "
-                            "de solicitudes ciudadanas de manera organizada y accesible.",
-                            font_size="14px", color=TEXT_SUB, line_height="1.7",
-                            max_width="420px",
+                            "Radica, consulta y gestiona tus Peticiones, Quejas, Reclamos y Sugerencias de forma clara, rápida y segura.",
+                            color="rgba(255,255,255,0.85)",
+                            font_size="lg",
+                            max_width="680px"
                         ),
-                        rx.link(
-                            rx.hstack(
-                                rx.text("Conocer más", font_size="14px",
-                                        font_weight="600", color=ORANGE),
-                                rx.icon("arrow-right", size=14, color=ORANGE),
-                                spacing="1",
-                            ),
-                            href="/politica-privacidad",
-                            text_decoration="none",
-                            _hover={"opacity": "0.8"},
+                        rx.hstack(
+                            rx.link(rx.button("Radicar PQRS", color_scheme="blue", size="4", width="200px"), href="/solicitudes"),
+                            rx.link(rx.button("Consultar Estado", color_scheme="blue", size="4", width="200px"), href="/consultar-estado"),
+                            spacing="4",
+                            flex_wrap="wrap"
                         ),
-                        spacing="5", align_items="start", flex="1",
+                        spacing="6",
+                        align_items="start",
+                        width="100%",
+                        max_width="720px"
                     ),
-                    rx.vstack(
-                        _info_feature("shield", "Canal seguro",
-                            "Tus datos y solicitudes se gestionan en un entorno controlado y cifrado.",
-                            TEAL),
-                        _info_feature("git-branch", "Trazabilidad completa",
-                            "Cada solicitud tiene radicado único y puede consultarse en cualquier momento.",
-                            GREEN),
-                        _info_feature("clock", "Atención oportuna",
-                            "Plazos legales establecidos: 15 días hábiles para la mayoría de solicitudes.",
-                            AMBER),
-                        _info_feature("bell", "Notificaciones",
-                            "Recibe actualizaciones por correo cuando tu solicitud cambie de estado.",
-                            NAVY_MID),
-                        spacing="4", flex="1", align_items="start",
+                    rx.card(
+                        rx.vstack(
+                            rx.heading("Accesos rápidos", size="5", color="#000000"),
+                            rx.link(rx.button("Registrarme", color_scheme="blue", width="100%"), href="/registro"),
+                            rx.link(rx.button("Iniciar sesión", variant="solid", color_scheme="gray", width="100%"), href="/login"),
+                            rx.link(rx.button("Nueva solicitud", variant="outline", color_scheme="gray", width="100%"), href="/solicitudes"),
+                            rx.text("Disponible para ciudadanos que deseen registrar y hacer seguimiento a sus solicitudes.", color="dark", font_size="sm"),
+                            spacing="4",
+                            align_items="stretch"
+                        ),
+                        p="6",
+                        bg="rgba(255,255,255,0.08)",
+                        border="1px solid rgba(255,255,255,0.15)",
+                        border_radius="2xl",
+                        width="100%",
+                        max_width="340px"
                     ),
                     spacing="8",
-                    align_items="start",
-                    flex_wrap="wrap",
-                    width="100%",
+                    align_items="center",
+                    justify="between",
+                    flex_wrap="wrap"
                 ),
-                max_width="1280px",
-                padding_x={"base":"20px","md":"40px"},
-                padding_y="64px",
+                max_width="1200px",
+                padding_y="20",
+                padding_x="6"
             ),
-            bg=PAGE_BG, width="100%",
+            width="100%",
+            min_height="520px",
+            style={
+                "backgroundImage": "linear-gradient(90deg, rgba(15,23,42,0.84), rgba(15,23,42,0.30)), url('/Gemini_Generated_Image_ouyornouyornouyo.png')",
+                "backgroundSize": "cover",
+                "backgroundPosition": "center",
+                "backgroundRepeat": "no-repeat"
+            }
         ),
- 
-        # ── FOOTER ────────────────────────────────────────────────────────
-        _footer(),
- 
-        bg=PAGE_BG, width="100%",
+
+        rx.container(
+            rx.vstack(
+                rx.vstack(
+                    rx.heading("¿Qué deseas hacer hoy?", size="7", color="#0f172a"),
+                    rx.text("Accede rápidamente a los servicios principales del sistema.", color="#475569", font_size="md"),
+                    spacing="3",
+                    align_items="center"
+                ),
+                rx.hstack(
+                    quick_action_card("Radicar PQRS", "Crea una nueva petición, queja, reclamo o sugerencia.", "Ir al formulario", "/solicitudes", "blue"),
+                    quick_action_card("Consultar estado", "Revisa el avance y respuesta de tus solicitudes.", "Consultar", "/consultar-estado", "cyan"),
+                    quick_action_card("Registro ciudadano", "Crea tu cuenta para gestionar trámites de forma segura.", "Registrarme", "/registro", "green"),
+                    quick_action_card("Iniciar sesión", "Accede a tu cuenta y continúa tus gestiones.", "Entrar", "/login", "gray"),
+                    spacing="5",
+                    justify="center",
+                    flex_wrap="wrap"
+                ),
+                spacing="9",
+                align_items="center"
+            ),
+            max_width="1200px",
+            padding_y="20",
+            padding_x="6"
+        ),
+
+        rx.box(
+            rx.container(
+                rx.vstack(
+                    rx.heading("Atención clara y transparente para la ciudadanía", size="7", color="#0f172a"),
+                    rx.text("Este portal facilita la recepción, gestión y seguimiento de solicitudes ciudadanas de manera organizada y accesible.", color="#64748b", font_size="md", text_align="center", max_width="850px"),
+                    spacing="4",
+                    align_items="center"
+                ),
+                rx.hstack(
+                    info_card("Canal seguro", "Tus datos y solicitudes se gestionan en un entorno controlado."),
+                    info_card("Trazabilidad", "Cada solicitud puede registrarse y consultarse con mayor claridad."),
+                    info_card("Atención oportuna", "El sistema está pensado para mejorar tiempos y experiencia ciudadana."),
+                    spacing="5",
+                    justify="center",
+                    flex_wrap="wrap"
+                ),
+                spacing="9",
+                align_items="center"
+            ),
+            width="100%",
+            bg=section_bg,
+            padding_y="20"
+        ),
+
+        rx.container(
+            rx.vstack(
+                rx.heading("¿Qué significa PQRS?", size="7", color="#0f172a"),
+                rx.hstack(
+                    pqrs_badge("Petición", "Solicitud respetuosa de información o actuación por parte de la entidad.", "#2563eb"),
+                    pqrs_badge("Queja", "Manifestación de inconformidad por la conducta o atención recibida.", "#f59e0b"),
+                    pqrs_badge("Reclamo", "Expresión de inconformidad por una prestación deficiente o incumplimiento.", "#ef4444"),
+                    pqrs_badge("Sugerencia", "Propuesta o recomendación para mejorar la atención o el servicio.", "#10b981"),
+                    spacing="5",
+                    justify="center",
+                    flex_wrap="wrap"
+                ),
+                spacing="8",
+                align_items="center"
+            ),
+            max_width="1200px",
+            padding_y="20",
+            padding_x="6"
+        ),
+
+        footer(),
+        brand_footer(),
+        bg=body_bg,
+        width="100%",
+        min_height="100vh"
+    )
+
+
+def quick_action_card(title: str, desc: str, button_text: str, href: str, accent: str = "blue") -> rx.Component:
+    card_bg = rx.color_mode_cond(light="white", dark="#111827")
+    border = rx.color_mode_cond(light="1px solid #e2e8f0", dark="1px solid #334155")
+    text_main = rx.color_mode_cond(light="#0f172a", dark="white")
+    text_sec = rx.color_mode_cond(light="#475569", dark="#cbd5e1")
+
+    return rx.card(
+        rx.vstack(
+            rx.heading(title, size="5", color=text_main),
+            rx.text(desc, color=text_sec, font_size="sm"),
+            rx.link(rx.button(button_text, color_scheme=accent, width="100%"), href=href),
+            spacing="4",
+            align_items="start",
+            width="100%"
+        ),
+        bg=card_bg,
+        border=border,
+        border_radius="2xl",
+        p="6",
+        width="100%",
+        max_width="260px",
+        box_shadow="lg"
+    )
+
+
+def info_card(title: str, desc: str) -> rx.Component:
+    card_bg = rx.color_mode_cond(light="white", dark="#111827")
+    border = rx.color_mode_cond(light="1px solid #e2e8f0", dark="1px solid #334155")
+    text_main = rx.color_mode_cond(light="#0f172a", dark="white")
+    text_sec = rx.color_mode_cond(light="#475569", dark="#cbd5e1")
+
+    return rx.card(
+        rx.vstack(
+            rx.text(title, font_weight="bold", color=text_main, font_size="md"),
+            rx.text(desc, color=text_sec, font_size="sm"),
+            spacing="3",
+            align_items="start"
+        ),
+        bg=card_bg,
+        border=border,
+        border_radius="xl",
+        p="5",
+        width="100%",
+        max_width="360px",
+        box_shadow="sm"
+    )
+
+
+def pqrs_badge(title: str, desc: str, color: str) -> rx.Component:
+    card_bg = rx.color_mode_cond(light="white", dark="#111827")
+    border = rx.color_mode_cond(light="1px solid #e2e8f0", dark="1px solid #334155")
+    text_sec = rx.color_mode_cond(light="#475569", dark="#cbd5e1")
+
+    return rx.card(
+        rx.vstack(
+            rx.box(
+                rx.text(title, color="white", font_weight="bold", font_size="sm"),
+                bg=color,
+                padding_x="3",
+                padding_y="2",
+                border_radius="full"
+            ),
+            rx.text(desc, color=text_sec, font_size="sm"),
+            spacing="3",
+            align_items="start"
+        ),
+        bg=card_bg,
+        border=border,
+        border_radius="xl",
+        p="5",
+        width="100%",
+        max_width="360px",
+        box_shadow="sm"
+    )
+
+
+def footer() -> rx.Component:
+    header_color = rx.color_mode_cond(light="black", dark="white")
+    text_color = rx.color_mode_cond(light="gray.700", dark="gray.400")
+    link_color = rx.color_mode_cond(light="blue.600", dark="blue.300")
+    bg_footer = rx.color_mode_cond(light="#f7fafc", dark="#111827")
+    border_color = rx.color_mode_cond(light="1px solid #e2e8f0", dark="1px solid #2d3748")
+
+    return rx.container(
+        rx.hstack(
+            # Columna 1: Información de la Entidad
+            rx.vstack(
+                rx.heading("Información de la Entidad", size="6", color=header_color),
+                rx.text("Sede Principal: Calle 10 # 5-20, Buenaventura, Valle del Cauca", color=text_color),
+                rx.text("Código Postal: 760001", color=text_color),
+                rx.text("PBX: (+57) 602 XXX XXXX", color=text_color),
+                rx.link(
+                    "Correo institucional: atencionalciudadano@empresa.gov.co", 
+                    href="mailto:atencionalciudadano@empresa.gov.co",
+                    color=link_color
+                ),
+                rx.link(
+                    "Ley 1755 de 2015", 
+                    href="https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=65334", 
+                    target="_blank",
+                    color=link_color
+                ),
+                rx.text(
+                    "Horario de atención presencial: Lunes a Viernes, 7:30 a.m. - 12:00 p.m. y 2:00 p.m. - 5:30 p.m.",
+                    color=text_color
+                ),
+                align_items="start",
+            ),
+            # Columna 2: Servicio al Ciudadano
+            rx.vstack(
+                rx.heading("Servicio al Ciudadano", size="6", color=header_color),
+                rx.link("Radicar solicitud PQRS (HU4)", href="/solicitudes", color=link_color),
+                rx.link("Consultar estado de solicitud (HU11)", href="/consultar-estado", color=link_color),
+                rx.link("Preguntas Frecuentes (FAQ)", href="/faq", color=link_color),
+                rx.link("Tiempos de respuesta (Ley 1755 de 2015)", href="/tiempos-respuesta", color=link_color),
+                rx.link("Notificaciones por aviso y judiciales", href="/notificaciones", color=link_color),
+                rx.link("Política de privacidad y protección de datos", href="/politica-privacidad", color=link_color),
+                rx.link("Manual de usuario (Enlace 1755)", href="/manual-1755", color=link_color),
+                align_items="start",
+            ),
+            # Columna 3: Contacto Directo y Redes
+            rx.vstack(
+                rx.heading("Contacto Directo y Redes", size="6", color=header_color),
+                rx.text("Recepción de correspondencia física: Lunes a viernes, 8:00 a.m. a 4:00 p.m.", color=text_color),
+                rx.text("Línea gratuita nacional: 01 8000 91XXXX", color=text_color),
+                rx.hstack(
+                    rx.link("Facebook", href="https://facebook.com", target="_blank", color=link_color),
+                    rx.link("X/Twitter", href="https://twitter.com", target="_blank", color=link_color),
+                    rx.link("YouTube", href="https://youtube.com", target="_blank", color=link_color),
+                    rx.link("LinkedIn", href="https://linkedin.com", target="_blank", color=link_color),
+                    spacing="4"
+                ),
+                rx.text("Sistema gestionado por: Enlace 1755 (Versión 1.0)", font_size="sm", color=text_color),
+                align_items="start",
+            ),
+            spacing="9",
+            align_items="start"
+        ),
+        width="100%",
+        padding_top="24px",
+        padding_bottom="24px",
+        bg=bg_footer,
+        border_top=border_color,
+        justify="center"
+    )
+
+
+def brand_footer() -> rx.Component:
+    """Franja inferior con logos institucionales (Universidad del Valle y GOV.CO)."""
+    return rx.container(
+        rx.hstack(
+            rx.image(src="/unival_logo.svg", alt="Universidad del Valle", height="48px"),
+            rx.spacer(),
+            rx.image(src="/govco_logo.svg", alt="Gobierno de Colombia", height="48px"),
+            spacing="6",
+            align_items="center",
+            justify="center"
+        ),
+        width="100%",
+        padding_top="12px",
+        padding_bottom="12px",
+        bg="white",
+        _dark={"bg": "gray.900", "borderColor": "gray.700"},
+        border_top="1px solid #e2e8f0"
     )
  
     
